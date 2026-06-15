@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
 cd "$(dirname "$0")"
+
+if [ ! -f ".venv/bin/activate" ]; then
+    echo "Sub-Scraper isn't set up yet (no virtual environment found)."
+    echo "Run the one-time setup first:"
+    echo ""
+    echo "    ./setup.sh"
+    echo ""
+    read -n 1 -s -r -p "Press any key to close..."
+    echo ""
+    exit 1
+fi
+
 source .venv/bin/activate
 python main.py
 status=$?

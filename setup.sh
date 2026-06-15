@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
+# Always operate from the app folder, no matter where this script is invoked
+# from (terminal cwd, file-manager double-click, desktop launcher, ...).
+cd "$(dirname "$0")"
+
 echo "========================================"
 echo "  Sub-Scraper — Automated Setup"
 echo "========================================"
@@ -38,17 +42,48 @@ fi
 echo "✓ tkinter found"
 
 # ── Virtual environment ────────────────────────────────────────────────────────
+# Treat a venv without an activate script as broken (e.g. an earlier run that
+# died part-way) and rebuild it from scratch.
+if [ -d ".venv" ] && [ ! -f ".venv/bin/activate" ]; then
+    echo "→ Removing an incomplete .venv from a previous run..."
+    rm -rf .venv
+fi
+
 if [ ! -d ".venv" ]; then
     echo "→ Creating virtual environment..."
-    python3 -m venv .venv
+    # SteamOS / some distros ship a Python whose bundled pip (ensurepip) is
+    # broken or stripped, so `python3 -m venv .venv` aborts. Fall back to a
+    # pip-less venv and bootstrap pip ourselves.
+    if ! python3 -m venv .venv 2>/dev/null; then
+        echo "  (standard venv failed — creating without pip and bootstrapping)"
+        rm -rf .venv
+        python3 -m venv --without-pip .venv
+    fi
+fi
+
+if [ ! -f ".venv/bin/activate" ]; then
+    echo ""
+    echo "ERROR: Could not create a virtual environment in .venv"
+    echo "       On Debian/Ubuntu install the venv package and re-run:"
+    echo "         sudo apt install python3-venv"
+    exit 1
 fi
 source .venv/bin/activate
+
+# Make sure pip exists inside the venv (it won't if we used --without-pip, and
+# can be missing on minimal SteamOS Python builds).
+if ! python -m pip --version &>/dev/null; then
+    echo "→ Bootstrapping pip..."
+    python -m ensurepip --upgrade 2>/dev/null \
+        || { curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py \
+             && python /tmp/get-pip.py && rm -f /tmp/get-pip.py; }
+fi
 echo "✓ Virtual environment ready"
 
 # ── Dependencies ───────────────────────────────────────────────────────────────
 echo "→ Installing Python dependencies (this may take a minute)..."
-pip install -q --upgrade pip
-pip install -q -r requirements.txt
+python -m pip install -q --upgrade pip
+python -m pip install -q -r requirements.txt
 echo "✓ Dependencies installed"
 
 # ── ffmpeg check ──────────────────────────────────────────────────────────────
@@ -119,6 +154,22 @@ else
         echo "   The app simply runs without the extra speed boost."
     fi
 fi
+
+# ── Verify the install actually works ──────────────────────────────────────────
+echo ""
+echo "→ Verifying the install..."
+if ! python -c "import customtkinter, aiohttp, spotipy, yt_dlp" 2>/tmp/ss_verify.log; then
+    echo ""
+    echo "ERROR: setup finished but core packages are missing:"
+    sed 's/^/       /' /tmp/ss_verify.log
+    rm -f /tmp/ss_verify.log
+    echo ""
+    echo "       The virtual environment is not usable yet. Try re-running"
+    echo "       ./setup.sh, or remove .venv and run it again."
+    exit 1
+fi
+rm -f /tmp/ss_verify.log
+echo "✓ All core packages import correctly"
 
 echo ""
 echo "========================================"
