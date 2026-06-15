@@ -24,7 +24,7 @@ class SpotifyScraper(BaseScraper):
             auth = SpotifyOAuth(
                 client_id=self.client_id,
                 client_secret=self.client_secret,
-                redirect_uri="http://localhost:8888/callback",
+                redirect_uri="http://127.0.0.1:8888/callback",
                 scope=_SCOPE,
                 cache_path=_CACHE,
                 open_browser=True,

@@ -143,7 +143,7 @@ class SetupWizard(ctk.CTkFrame):
             "1. Click the button below — it opens the Spotify Developer Dashboard in your browser.\n"
             "2. Log in with your Spotify account.\n"
             "3. Click  Create App  and give it any name you like.\n"
-            "4. Under  Redirect URIs  add exactly:  http://localhost:8888/callback\n"
+            "4. Under  Redirect URIs  add exactly:  http://127.0.0.1:8888/callback\n"
             "5. Copy the Client ID and Client Secret here."
         )
         self._link_btn("Open Spotify Developer Dashboard →", "https://developer.spotify.com/dashboard")
