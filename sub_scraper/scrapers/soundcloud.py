@@ -51,29 +51,36 @@ class SoundCloudScraper(BaseScraper):
         return tracks
 
     def fetch_playlists(self) -> list[dict]:
-        if not self.username:
-            raise ValueError("SoundCloud username is required.")
-        url = f"https://soundcloud.com/{self.username}/sets"
-        # Use -j (one JSON line per entry) rather than -J (single dump) because
-        # yt-dlp's -J leaves entries=null for SoundCloud due to lazy evaluation.
-        cmd = [_YT_DLP, "--flat-playlist", "-j", "--no-warnings", url] + self._auth_args()
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or "yt-dlp failed to fetch playlists")
-        playlists = []
-        for line in result.stdout.strip().splitlines():
-            try:
-                e = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            pid = e.get("webpage_url") or e.get("url", "")
-            if not pid:
-                continue
-            playlists.append({
-                "id": pid,
-                "name": e.get("title", "Unknown"),
-                "total": e.get("playlist_count") or e.get("n_entries") or 0,
-            })
+        """List the authenticated user's playlists via the SoundCloud API v2.
+        Requires auth_token; sees private/secret sets that yt-dlp cannot."""
+        if not self.auth_token:
+            raise ValueError(
+                "SoundCloud auth token is required to list playlists. Add it in Settings."
+            )
+        import requests
+        headers = {"Authorization": f"OAuth {self.auth_token}"}
+
+        me = requests.get("https://api-v2.soundcloud.com/me", headers=headers, timeout=15)
+        me.raise_for_status()
+        user_id = me.json()["id"]
+
+        playlists: list[dict] = []
+        next_url: str | None = (
+            f"https://api-v2.soundcloud.com/users/{user_id}/playlists"
+            "?representation=mini&limit=200"
+        )
+        while next_url:
+            r = requests.get(next_url, headers=headers, timeout=15)
+            r.raise_for_status()
+            data = r.json()
+            for p in data.get("collection", []):
+                playlists.append({
+                    "id": p["permalink_url"],
+                    "name": p["title"],
+                    "total": p.get("track_count", 0),
+                })
+            next_url = data.get("next_href")
+
         return playlists
 
     def fetch_playlist_tracks(self, playlist_url: str) -> list[Track]:
