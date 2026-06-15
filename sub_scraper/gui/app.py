@@ -80,12 +80,13 @@ class TrackRow(ctk.CTkFrame):
         self._on_toggle(self.track, self.selected.get())
 
     def refresh_status(self) -> None:
+        # Keep the checkbox enabled in every state so the user can always
+        # deselect or re-queue a track. Completed tracks are skipped at
+        # download time (_make_jobs), so locking the box was unnecessary.
         self._status_lbl.configure(
             text=_STATUS_ICON[self.track.status],
             text_color=_STATUS_COLOR[self.track.status],
         )
-        if self.track.status in (DownloadStatus.COMPLETE, DownloadStatus.FAILED):
-            self._checkbox.configure(state="disabled")
 
     def set_selected(self, value: bool) -> None:
         self.selected.set(value)
