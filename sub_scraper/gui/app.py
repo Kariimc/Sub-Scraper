@@ -175,9 +175,16 @@ class LibraryPanel(ctk.CTkFrame):
         self._playlist_var = tk.StringVar(value="")
         self._playlist_menu = ctk.CTkOptionMenu(
             content_row, values=[""], variable=self._playlist_var,
-            command=self._on_playlist_select, width=280,
+            command=self._on_playlist_select, width=240,
         )
-        # Not packed until playlists have been fetched
+        # Not packed until playlists have been fetched (Spotify auto-discovery)
+
+        self._playlist_url_var = tk.StringVar(value="")
+        self._playlist_url_entry = ctk.CTkEntry(
+            content_row, textvariable=self._playlist_url_var,
+            placeholder_text="Paste playlist URL…", width=340,
+        )
+        # Not packed until Playlists mode is active
 
     def _build_list(self) -> None:
         self._scroll = ctk.CTkScrollableFrame(self, fg_color=DARK_BG)
@@ -384,19 +391,21 @@ class LibraryPanel(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _on_source_change(self, _: str) -> None:
-        self._content_var.set("Liked Songs")
         self._clear()
         self._playlists = []
         self._scraper = None
         self._status_lbl.configure(text="")
         self._playlist_menu.pack_forget()
+        self._playlist_url_entry.pack_forget()
         self._load_btn.configure(text="Load Library")
+        self._content_var.set("Liked Songs")
 
     def _load_library(self) -> None:
-        # In playlist mode, once playlists are loaded the reload button
-        # re-fetches the currently selected playlist's tracks instead of
-        # re-fetching the playlist list.
-        if self._content_var.get() == "Playlists" and self._playlists and self._playlist_var.get():
+        # In Spotify playlist mode, once playlists are loaded the reload button
+        # re-fetches the currently selected playlist's tracks.
+        if (self._content_var.get() == "Playlists"
+                and self._source_var.get() == "Spotify"
+                and self._playlists and self._playlist_var.get()):
             self._on_playlist_select(self._playlist_var.get())
             return
         self._load_btn.configure(state="disabled", text="Loading…")
@@ -420,8 +429,17 @@ class LibraryPanel(ctk.CTkFrame):
                 self._manager.configure_soundcloud(scraper)
 
             if self._content_var.get() == "Playlists":
-                playlists = scraper.fetch_playlists()
-                self._events.put(("playlists", playlists, scraper))
+                if source == "SoundCloud":
+                    # yt-dlp can't enumerate private SoundCloud sets, so we
+                    # use a URL the user pastes directly.
+                    pl_url = self._playlist_url_var.get().strip()
+                    if not pl_url:
+                        raise ValueError("Paste a SoundCloud playlist URL in the field first.")
+                    tracks = scraper.fetch_playlist_tracks(pl_url)
+                    self._events.put(("populate", tracks))
+                else:
+                    playlists = scraper.fetch_playlists()
+                    self._events.put(("playlists", playlists, scraper))
             else:
                 tracks = scraper.fetch_library()
                 self._events.put(("populate", tracks))
@@ -438,7 +456,11 @@ class LibraryPanel(ctk.CTkFrame):
         self._scraper = None
         self._status_lbl.configure(text="")
         self._playlist_menu.pack_forget()
+        self._playlist_url_entry.pack_forget()
         self._load_btn.configure(text="Load Library")
+        if value == "Playlists" and self._source_var.get() == "SoundCloud":
+            self._playlist_url_var.set("")
+            self._playlist_url_entry.pack(side="left", padx=(12, 0))
 
     def _on_playlists_loaded(self, playlists: list[dict], scraper) -> None:
         self._playlists = playlists
