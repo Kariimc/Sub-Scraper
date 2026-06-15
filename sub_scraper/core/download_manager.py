@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class DownloadJob:
-    __slots__ = ("track", "source", "output_dir", "quality", "fmt", "on_progress")
+    __slots__ = ("track", "source", "output_dir", "quality", "fmt", "on_progress", "on_log")
 
     def __init__(
         self,
@@ -23,6 +23,7 @@ class DownloadJob:
         quality: str,
         fmt: str,
         on_progress: Optional[Callable[[Track], None]] = None,
+        on_log: Optional[Callable[[str], None]] = None,
     ) -> None:
         self.track = track
         self.source = source
@@ -30,6 +31,7 @@ class DownloadJob:
         self.quality = quality
         self.fmt = fmt
         self.on_progress = on_progress
+        self.on_log = on_log
 
 
 class DownloadManager:
@@ -73,11 +75,11 @@ class DownloadManager:
                 if job.source == "spotify":
                     if self._spotify is None:
                         raise RuntimeError("Spotify scraper not configured")
-                    path = self._spotify.download(track, job.output_dir, job.quality, job.fmt)
+                    path = self._spotify.download(track, job.output_dir, job.quality, job.fmt, job.on_log)
                 else:
                     if self._soundcloud is None:
                         raise RuntimeError("SoundCloud scraper not configured")
-                    path = self._soundcloud.download(track, job.output_dir, job.quality, job.fmt)
+                    path = self._soundcloud.download(track, job.output_dir, job.quality, job.fmt, job.on_log)
 
                 track.local_path = path
                 track.status = DownloadStatus.COMPLETE

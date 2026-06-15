@@ -1,7 +1,7 @@
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
@@ -82,27 +82,38 @@ class SpotifyScraper(BaseScraper):
             cover_url=images[0].get("url", "") if images else "",
         )
 
-    def download(self, track: Track, output_dir: str, quality: str, fmt: str) -> str:
+    def download(
+        self,
+        track: Track,
+        output_dir: str,
+        quality: str,
+        fmt: str,
+        on_log: Optional[Callable[[str], None]] = None,
+    ) -> str:
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
 
         template = str(out / "{artist} - {title}.{output-ext}")
-        result = subprocess.run(
-            [
-                "spotdl", "download", track.url,
-                "--client-id", self.client_id,
-                "--client-secret", self.client_secret,
-                "--output", template,
-                "--format", fmt,
-                "--bitrate", quality,
-                "--no-cache",
-            ],
-            capture_output=True,
-            text=True,
-        )
+        cmd = [
+            "spotdl", "download", track.url,
+            "--client-id", self.client_id,
+            "--client-secret", self.client_secret,
+            "--output", template,
+            "--format", fmt,
+            "--bitrate", quality,
+            "--no-cache",
+        ]
 
-        if result.returncode != 0:
-            raise RuntimeError((result.stderr or result.stdout).strip() or "spotdl exited non-zero")
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        assert process.stdout is not None
+        for line in process.stdout:
+            stripped = line.strip()
+            if stripped and on_log:
+                on_log(f"[spotDL] {stripped}")
+        process.wait()
+
+        if process.returncode != 0:
+            raise RuntimeError(f"spotdl exited with code {process.returncode}")
 
         safe_artist = re.sub(r'[<>:"/\\|?*]', "_", track.artist)
         safe_title = re.sub(r'[<>:"/\\|?*]', "_", track.title)

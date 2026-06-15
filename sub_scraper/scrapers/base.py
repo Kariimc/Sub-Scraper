@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Callable, Optional
 
 
 class DownloadStatus(Enum):
@@ -34,4 +34,11 @@ class BaseScraper(ABC):
     def fetch_library(self, **kwargs) -> list[Track]: ...
 
     @abstractmethod
-    def download(self, track: Track, output_dir: str, quality: str, fmt: str) -> str: ...
+    def download(
+        self,
+        track: Track,
+        output_dir: str,
+        quality: str,
+        fmt: str,
+        on_log: Optional[Callable[[str], None]] = None,
+    ) -> str: ...

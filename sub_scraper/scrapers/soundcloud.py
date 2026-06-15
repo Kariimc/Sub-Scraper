@@ -1,6 +1,7 @@
 import json
 import subprocess
 from pathlib import Path
+from typing import Callable, Optional
 
 from .base import BaseScraper, Track
 
@@ -49,10 +50,18 @@ class SoundCloudScraper(BaseScraper):
             ))
         return tracks
 
-    def download(self, track: Track, output_dir: str, quality: str, fmt: str) -> str:
+    def download(
+        self,
+        track: Track,
+        output_dir: str,
+        quality: str,
+        fmt: str,
+        on_log: Optional[Callable[[str], None]] = None,
+    ) -> str:
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
 
+        archive_file = out / "archive.txt"
         template = str(out / "%(uploader)s - %(title)s.%(ext)s")
         cmd = [
             _YT_DLP,
@@ -63,18 +72,27 @@ class SoundCloudScraper(BaseScraper):
             "--no-playlist",
             "--embed-thumbnail",
             "--add-metadata",
+            "--download-archive", str(archive_file),
             track.url,
         ] + self._auth_args()
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or "yt-dlp download failed")
+        last_dest: Optional[str] = None
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        assert process.stdout is not None
+        for line in process.stdout:
+            stripped = line.strip()
+            if stripped:
+                if on_log:
+                    on_log(f"[yt-dlp] {stripped}")
+                if "[ExtractAudio] Destination:" in stripped:
+                    last_dest = stripped.split("Destination:", 1)[-1].strip()
+        process.wait()
 
-        for line in result.stdout.splitlines():
-            if "[ExtractAudio] Destination:" in line:
-                path = line.split("Destination:", 1)[-1].strip()
-                if Path(path).exists():
-                    return path
+        if process.returncode != 0:
+            raise RuntimeError(f"yt-dlp exited with code {process.returncode}")
+
+        if last_dest and Path(last_dest).exists():
+            return last_dest
 
         for ext in (fmt, "mp3", "m4a", "ogg", "opus"):
             newest = sorted(out.glob(f"*.{ext}"), key=lambda p: p.stat().st_mtime, reverse=True)
