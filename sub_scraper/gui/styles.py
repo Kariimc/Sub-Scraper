@@ -1,0 +1,16 @@
+DARK_BG = "#13131f"
+SIDEBAR_BG = "#0d0d18"
+PANEL_BG = "#111124"
+ACCENT = "#1e2a4a"
+HIGHLIGHT = "#e94560"
+HIGHLIGHT_HOVER = "#c73652"
+TEXT_PRIMARY = "#eaeaea"
+TEXT_SECONDARY = "#8888a8"
+SUCCESS = "#4caf50"
+ERROR = "#f44336"
+INFO = "#3b82f6"
+
+FONT_TITLE = ("Segoe UI", 20, "bold")
+FONT_SECTION = ("Segoe UI", 15, "bold")
+FONT_MEDIUM = ("Segoe UI", 13)
+FONT_SMALL = ("Segoe UI", 11)
