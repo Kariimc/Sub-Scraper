@@ -1,12 +1,10 @@
-import re
-import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
-from .base import BaseScraper, DownloadStatus, Track
+from .base import BaseScraper, Track, run_isolated_download
 
 _SCOPE = "user-library-read playlist-read-private"
 _CACHE = str(Path.home() / ".sub_scraper" / ".spotify_cache")
@@ -90,39 +88,16 @@ class SpotifyScraper(BaseScraper):
         fmt: str,
         on_log: Optional[Callable[[str], None]] = None,
     ) -> str:
-        out = Path(output_dir)
-        out.mkdir(parents=True, exist_ok=True)
+        def build_cmd(tmp: Path) -> list:
+            template = str(tmp / "{artist} - {title}.{output-ext}")
+            return [
+                "spotdl", "download", track.url,
+                "--client-id", self.client_id,
+                "--client-secret", self.client_secret,
+                "--output", template,
+                "--format", fmt,
+                "--bitrate", quality,
+                "--no-cache",
+            ]
 
-        template = str(out / "{artist} - {title}.{output-ext}")
-        cmd = [
-            "spotdl", "download", track.url,
-            "--client-id", self.client_id,
-            "--client-secret", self.client_secret,
-            "--output", template,
-            "--format", fmt,
-            "--bitrate", quality,
-            "--no-cache",
-        ]
-
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        assert process.stdout is not None
-        for line in process.stdout:
-            stripped = line.strip()
-            if stripped and on_log:
-                on_log(f"[spotDL] {stripped}")
-        process.wait()
-
-        if process.returncode != 0:
-            raise RuntimeError(f"spotdl exited with code {process.returncode}")
-
-        safe_artist = re.sub(r'[<>:"/\\|?*]', "_", track.artist)
-        safe_title = re.sub(r'[<>:"/\\|?*]', "_", track.title)
-        candidate = out / f"{safe_artist} - {safe_title}.{fmt}"
-        if candidate.exists():
-            return str(candidate)
-
-        newest = sorted(out.glob(f"*.{fmt}"), key=lambda p: p.stat().st_mtime, reverse=True)
-        if newest:
-            return str(newest[0])
-
-        raise FileNotFoundError(f"Output file not found for: {track.display_name}")
+        return run_isolated_download(build_cmd, output_dir, track, "[spotDL]", on_log)

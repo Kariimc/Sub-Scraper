@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
-from .base import BaseScraper, Track
+from .base import BaseScraper, Track, run_isolated_download
 
 _YT_DLP = "yt-dlp"
 
@@ -58,45 +58,18 @@ class SoundCloudScraper(BaseScraper):
         fmt: str,
         on_log: Optional[Callable[[str], None]] = None,
     ) -> str:
-        out = Path(output_dir)
-        out.mkdir(parents=True, exist_ok=True)
+        def build_cmd(tmp: Path) -> list:
+            template = str(tmp / "%(uploader)s - %(title)s.%(ext)s")
+            return [
+                _YT_DLP,
+                "--extract-audio",
+                "--audio-format", fmt,
+                "--audio-quality", quality,
+                "--output", template,
+                "--no-playlist",
+                "--embed-thumbnail",
+                "--add-metadata",
+                track.url,
+            ] + self._auth_args()
 
-        archive_file = out / "archive.txt"
-        template = str(out / "%(uploader)s - %(title)s.%(ext)s")
-        cmd = [
-            _YT_DLP,
-            "--extract-audio",
-            "--audio-format", fmt,
-            "--audio-quality", quality,
-            "--output", template,
-            "--no-playlist",
-            "--embed-thumbnail",
-            "--add-metadata",
-            "--download-archive", str(archive_file),
-            track.url,
-        ] + self._auth_args()
-
-        last_dest: Optional[str] = None
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        assert process.stdout is not None
-        for line in process.stdout:
-            stripped = line.strip()
-            if stripped:
-                if on_log:
-                    on_log(f"[yt-dlp] {stripped}")
-                if "[ExtractAudio] Destination:" in stripped:
-                    last_dest = stripped.split("Destination:", 1)[-1].strip()
-        process.wait()
-
-        if process.returncode != 0:
-            raise RuntimeError(f"yt-dlp exited with code {process.returncode}")
-
-        if last_dest and Path(last_dest).exists():
-            return last_dest
-
-        for ext in (fmt, "mp3", "m4a", "ogg", "opus"):
-            newest = sorted(out.glob(f"*.{ext}"), key=lambda p: p.stat().st_mtime, reverse=True)
-            if newest:
-                return str(newest[0])
-
-        raise FileNotFoundError(f"Output file not found for: {track.display_name}")
+        return run_isolated_download(build_cmd, output_dir, track, "[yt-dlp]", on_log)
