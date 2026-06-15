@@ -16,6 +16,10 @@ class GDriveUploader:
         # workers each launch run_local_server + a browser at once, which
         # crashes the process (segfault) on the first batch.
         self._auth_lock = threading.Lock()
+        # The googleapiclient service (httplib2 transport) is NOT thread-safe.
+        # Parallel workers sharing one connection corrupt it at the C level
+        # and segfault, so every upload is serialized through this lock.
+        self._upload_lock = threading.Lock()
 
     def _get_service(self) -> Any:
         if self._service:
@@ -60,5 +64,8 @@ class GDriveUploader:
             metadata["parents"] = [self.folder_id]
 
         media = MediaFileUpload(str(path), resumable=True)
-        result = service.files().create(body=metadata, media_body=media, fields="id").execute()
+        with self._upload_lock:
+            result = service.files().create(
+                body=metadata, media_body=media, fields="id"
+            ).execute()
         return result.get("id", "")
