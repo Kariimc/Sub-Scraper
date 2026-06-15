@@ -18,7 +18,7 @@ Name=Sub-Scraper
 Comment=Download your Spotify and SoundCloud libraries
 Exec=$APP_DIR/run.sh
 Path=$APP_DIR
-Icon=multimedia-player
+Icon=$APP_DIR/assets/icon.png
 Terminal=true
 Categories=AudioVideo;Audio;
 EOF
