@@ -10,6 +10,31 @@ from typing import Callable, Optional
 # Final audio container extensions we expect a download to produce.
 _AUDIO_EXTS = {"mp3", "m4a", "ogg", "opus", "wav", "flac", "aac"}
 
+# Smallest plausible real audio file; anything below is treated as corrupt.
+_MIN_AUDIO_BYTES = 1024
+
+
+def ytdlp_perf_flags(concurrent_fragments: int = 4, use_aria2c: bool = True) -> list[str]:
+    """yt-dlp flags that maximise throughput and resilience: parallel fragment
+    downloads, native retries, and aria2c (16 parallel connections) as the
+    external downloader when it is installed."""
+    flags = [
+        "-N", str(max(1, concurrent_fragments)),
+        "--retries", "10",
+        "--fragment-retries", "10",
+        "--file-access-retries", "5",
+    ]
+    if use_aria2c and shutil.which("aria2c"):
+        flags += ["--downloader", "aria2c",
+                  "--downloader-args", "aria2c:-x16 -s16 -k1M"]
+    return flags
+
+
+def ytdlp_perf_args_str(concurrent_fragments: int = 4) -> str:
+    """The throughput/resilience flags as one string, for tools that forward
+    args to yt-dlp (e.g. spotdl's --yt-dlp-args)."""
+    return f"-N {max(1, concurrent_fragments)} --retries 10 --fragment-retries 10"
+
 
 class DownloadStatus(Enum):
     PENDING = "pending"
@@ -95,8 +120,8 @@ def run_isolated_download(
 
         # The audio track is the largest matching file (ignores stray artwork).
         src = max(audio, key=lambda p: p.stat().st_size)
-        if src.stat().st_size == 0:
-            raise RuntimeError(f"Download produced an empty file for: {track.display_name}")
+        if src.stat().st_size < _MIN_AUDIO_BYTES:
+            raise RuntimeError(f"Download produced a corrupt/empty file for: {track.display_name}")
         dest = out / src.name
         shutil.move(str(src), str(dest))
         return str(dest)

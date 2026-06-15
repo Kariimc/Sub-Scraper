@@ -16,8 +16,10 @@ class Config:
     download_path: str = str(Path.home() / "Music" / "SubScraper")
     output_format: str = "mp3"
     audio_quality: str = "320k"
-    max_concurrent: int = 4
+    max_concurrent: int = 6
     chunk_size: int = 50
+    concurrent_fragments: int = 4
+    retry_limit: int = 3
     use_gdrive: bool = False
 
     def save(self) -> None:

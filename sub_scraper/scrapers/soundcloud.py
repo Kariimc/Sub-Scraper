@@ -4,16 +4,19 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
-from .base import BaseScraper, Track, run_isolated_download
+from .base import BaseScraper, Track, run_isolated_download, ytdlp_perf_flags
 
 _YT_DLP = "yt-dlp"
 _API = "https://api-v2.soundcloud.com"
 
 
 class SoundCloudScraper(BaseScraper):
-    def __init__(self, auth_token: str = "", username: str = "") -> None:
+    def __init__(
+        self, auth_token: str = "", username: str = "", concurrent_fragments: int = 4
+    ) -> None:
         self.auth_token = auth_token
         self.username = username
+        self.concurrent_fragments = concurrent_fragments
         self._client_id = ""
 
     def _auth_args(self) -> list[str]:
@@ -252,6 +255,6 @@ class SoundCloudScraper(BaseScraper):
                 "--embed-thumbnail",
                 "--add-metadata",
                 track.url,
-            ] + self._auth_args()
+            ] + ytdlp_perf_flags(self.concurrent_fragments) + self._auth_args()
 
         return run_isolated_download(build_cmd, output_dir, track, "[yt-dlp]", on_log)

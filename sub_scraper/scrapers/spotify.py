@@ -4,16 +4,19 @@ from typing import Callable, Optional
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
-from .base import BaseScraper, Track, run_isolated_download
+from .base import BaseScraper, Track, run_isolated_download, ytdlp_perf_args_str
 
 _SCOPE = "user-library-read playlist-read-private"
 _CACHE = str(Path.home() / ".sub_scraper" / ".spotify_cache")
 
 
 class SpotifyScraper(BaseScraper):
-    def __init__(self, client_id: str, client_secret: str) -> None:
+    def __init__(
+        self, client_id: str, client_secret: str, concurrent_fragments: int = 4
+    ) -> None:
         self.client_id = client_id
         self.client_secret = client_secret
+        self.concurrent_fragments = concurrent_fragments
         self._sp: Optional[spotipy.Spotify] = None
 
     @property
@@ -98,6 +101,9 @@ class SpotifyScraper(BaseScraper):
                 "--format", fmt,
                 "--bitrate", quality,
                 "--no-cache",
+                # Forward parallel-fragment + retry flags to the underlying
+                # yt-dlp that spotdl drives.
+                "--yt-dlp-args", ytdlp_perf_args_str(self.concurrent_fragments),
             ]
 
         return run_isolated_download(build_cmd, output_dir, track, "[spotDL]", on_log)

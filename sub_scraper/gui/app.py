@@ -405,16 +405,22 @@ class LibraryPanel(ctk.CTkFrame):
     def _fetch(self) -> None:
         try:
             source = self._source_var.get()
+            try:
+                frags = int(self._config.concurrent_fragments)
+            except (ValueError, TypeError):
+                frags = 4
             if source == "Spotify":
                 scraper = SpotifyScraper(
                     self._config.spotify_client_id,
                     self._config.spotify_client_secret,
+                    concurrent_fragments=frags,
                 )
                 self._manager.configure_spotify(scraper)
             else:
                 scraper = SoundCloudScraper(
                     auth_token=self._config.soundcloud_auth_token,
                     username=self._config.soundcloud_username,
+                    concurrent_fragments=frags,
                 )
                 self._manager.configure_soundcloud(scraper)
 
@@ -643,6 +649,8 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self._dropdown("Quality", "audio_quality", ["128k", "192k", "256k", "320k"])
         self._field("Max Concurrent Downloads", "max_concurrent")
         self._field("Default Chunk Size", "chunk_size")
+        self._field("Parallel Fragments / Track", "concurrent_fragments")
+        self._field("Retry Limit", "retry_limit")
 
         self._section("Google Drive")
         self._checkbox("Enable Google Drive Sync", "use_gdrive")
@@ -655,16 +663,21 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         ).pack(pady=20)
 
     def _save(self) -> None:
-        try:
-            self._config.max_concurrent = int(self._config.max_concurrent)
-        except (ValueError, TypeError):
-            self._config.max_concurrent = 4
-        try:
-            self._config.chunk_size = int(self._config.chunk_size)
-        except (ValueError, TypeError):
-            self._config.chunk_size = 50
+        for attr, default in (
+            ("max_concurrent", 6),
+            ("chunk_size", 50),
+            ("concurrent_fragments", 4),
+            ("retry_limit", 3),
+        ):
+            try:
+                setattr(self._config, attr, int(getattr(self._config, attr)))
+            except (ValueError, TypeError):
+                setattr(self._config, attr, default)
         self._config.save()
-        messagebox.showinfo("Sub-Scraper", "Settings saved.")
+        messagebox.showinfo(
+            "Sub-Scraper",
+            "Settings saved. Restart the app for concurrency changes to take effect.",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -680,7 +693,10 @@ class App(ctk.CTk):
         self.configure(fg_color=DARK_BG)
 
         self._config = Config.load()
-        self._manager = DownloadManager(max_workers=int(self._config.max_concurrent))
+        self._manager = DownloadManager(
+            max_workers=int(self._config.max_concurrent),
+            retry_limit=int(self._config.retry_limit),
+        )
         self._manager.start()
 
         self._panels: dict[str, ctk.CTkFrame] = {}
