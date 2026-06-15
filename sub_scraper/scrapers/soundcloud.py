@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Callable, Optional
@@ -6,17 +7,57 @@ from typing import Callable, Optional
 from .base import BaseScraper, Track, run_isolated_download
 
 _YT_DLP = "yt-dlp"
+_API = "https://api-v2.soundcloud.com"
 
 
 class SoundCloudScraper(BaseScraper):
     def __init__(self, auth_token: str = "", username: str = "") -> None:
         self.auth_token = auth_token
         self.username = username
+        self._client_id = ""
 
     def _auth_args(self) -> list[str]:
         if self.auth_token:
             return ["--add-header", f"Authorization: OAuth {self.auth_token}"]
         return []
+
+    def _get_client_id(self) -> str:
+        """Scrape a public client_id from SoundCloud's web assets, the same way
+        yt-dlp does. The API v2 rejects requests (403) without one even when an
+        OAuth token is supplied."""
+        if self._client_id:
+            return self._client_id
+        import requests
+
+        home = requests.get(
+            "https://soundcloud.com/", timeout=15,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        home.raise_for_status()
+        script_urls = re.findall(r'<script[^>]+src="([^"]+)"', home.text)
+        # The client_id lives in one of the later JS bundles.
+        for url in reversed(script_urls):
+            if not url.startswith("http"):
+                continue
+            try:
+                js = requests.get(url, timeout=15).text
+            except Exception:
+                continue
+            m = re.search(r'[?&"]client_id[=:]"?([0-9a-zA-Z]{32})', js)
+            if m:
+                self._client_id = m.group(1)
+                return self._client_id
+        raise RuntimeError("Could not extract a SoundCloud client_id.")
+
+    def _api_get(self, path: str, **params) -> dict:
+        import requests
+        params["client_id"] = self._get_client_id()
+        headers = {"Authorization": f"OAuth {self.auth_token}"} if self.auth_token else {}
+        url = path if path.startswith("http") else f"{_API}{path}"
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+        r.raise_for_status()
+        return r.json()
+
 
     def fetch_library(self, **kwargs) -> list[Track]:
         if not self.username:
@@ -57,22 +98,14 @@ class SoundCloudScraper(BaseScraper):
             raise ValueError(
                 "SoundCloud auth token is required to list playlists. Add it in Settings."
             )
-        import requests
-        headers = {"Authorization": f"OAuth {self.auth_token}"}
-
-        me = requests.get("https://api-v2.soundcloud.com/me", headers=headers, timeout=15)
-        me.raise_for_status()
-        user_id = me.json()["id"]
+        user_id = self._api_get("/me")["id"]
 
         playlists: list[dict] = []
-        next_url: str | None = (
-            f"https://api-v2.soundcloud.com/users/{user_id}/playlists"
-            "?representation=mini&limit=200"
+        next_url: Optional[str] = (
+            f"/users/{user_id}/playlists?representation=mini&limit=200"
         )
         while next_url:
-            r = requests.get(next_url, headers=headers, timeout=15)
-            r.raise_for_status()
-            data = r.json()
+            data = self._api_get(next_url)
             for p in data.get("collection", []):
                 playlists.append({
                     "id": p["permalink_url"],
