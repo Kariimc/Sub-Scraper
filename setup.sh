@@ -23,6 +23,20 @@ if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 10 ]; }
 fi
 echo "✓ Python $PY_VER"
 
+# ── tkinter check (Linux ships it as a separate system package) ────────────────
+if ! python3 -c "import tkinter" 2>/dev/null; then
+    echo ""
+    echo "ERROR: tkinter not found — this is required for the GUI."
+    echo "       Install it with your package manager, then re-run this script:"
+    echo ""
+    echo "       Ubuntu/Debian:  sudo apt install python3-tk"
+    echo "       Fedora/RHEL:    sudo dnf install python3-tkinter"
+    echo "       Arch:           sudo pacman -S tk"
+    echo ""
+    exit 1
+fi
+echo "✓ tkinter found"
+
 # ── Virtual environment ────────────────────────────────────────────────────────
 if [ ! -d ".venv" ]; then
     echo "→ Creating virtual environment..."
