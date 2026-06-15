@@ -54,22 +54,25 @@ class SoundCloudScraper(BaseScraper):
         if not self.username:
             raise ValueError("SoundCloud username is required.")
         url = f"https://soundcloud.com/{self.username}/sets"
-        cmd = [_YT_DLP, "--flat-playlist", "-J", url] + self._auth_args()
+        # Use -j (one JSON line per entry) rather than -J (single dump) because
+        # yt-dlp's -J leaves entries=null for SoundCloud due to lazy evaluation.
+        cmd = [_YT_DLP, "--flat-playlist", "-j", "--no-warnings", url] + self._auth_args()
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or "yt-dlp failed to fetch playlists")
-        try:
-            data = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"Unexpected yt-dlp output: {exc}") from exc
         playlists = []
-        for e in (data.get("entries") or []):
-            if not e:
+        for line in result.stdout.strip().splitlines():
+            try:
+                e = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            pid = e.get("webpage_url") or e.get("url", "")
+            if not pid:
                 continue
             playlists.append({
-                "id": e.get("webpage_url") or e.get("url", ""),
+                "id": pid,
                 "name": e.get("title", "Unknown"),
-                "total": e.get("playlist_count") or 0,
+                "total": e.get("playlist_count") or e.get("n_entries") or 0,
             })
         return playlists
 
