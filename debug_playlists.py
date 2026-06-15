@@ -45,6 +45,7 @@ except Exception as exc:
     traceback.print_exc()
 
 print("\n=== Fetching playlists ===")
+playlists = []
 try:
     playlists = sc.fetch_playlists()
     print(f"Found {len(playlists)} playlists:")
@@ -54,3 +55,16 @@ except Exception as exc:
     import traceback
     traceback.print_exc()
     print(f"\nFAILED: {exc}")
+
+if playlists:
+    first = playlists[0]
+    print(f"\n=== Tracks in first playlist: {first['name']} ===")
+    try:
+        tracks = sc.fetch_playlist_tracks(first["id"])
+        print(f"Found {len(tracks)} tracks:")
+        for t in tracks[:15]:
+            print(f"  - {t.artist} - {t.title}  ({t.duration_ms // 1000}s)  {t.url}")
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        print(f"\nFAILED: {exc}")

@@ -164,6 +164,43 @@ class SoundCloudScraper(BaseScraper):
         return playlists
 
     def fetch_playlist_tracks(self, playlist_url: str) -> list[Track]:
+        # Prefer the API when authenticated: it returns full, reliable track
+        # metadata. yt-dlp's --flat-playlist often omits titles/uploaders for
+        # SoundCloud sets, which left rows blank.
+        if self.auth_token:
+            return self._fetch_playlist_tracks_api(playlist_url)
+        return self._fetch_playlist_tracks_ytdlp(playlist_url)
+
+    def _fetch_playlist_tracks_api(self, playlist_url: str) -> list[Track]:
+        pl = self._api_get("/resolve", url=playlist_url)
+        raw = pl.get("tracks", [])
+
+        # The playlist payload returns the first batch of tracks fully hydrated
+        # and the rest as bare {"id": ...} stubs. Fetch the stubs in batches.
+        full = [t for t in raw if t.get("title")]
+        stub_ids = [str(t["id"]) for t in raw if not t.get("title") and t.get("id")]
+        for i in range(0, len(stub_ids), 50):
+            chunk = ",".join(stub_ids[i:i + 50])
+            more = self._api_get("/tracks", ids=chunk)
+            full.extend(more if isinstance(more, list) else more.get("collection", []))
+
+        # Preserve the playlist's original order.
+        by_id = {str(t.get("id")): t for t in full}
+        ordered = [by_id[str(t["id"])] for t in raw if str(t.get("id")) in by_id]
+
+        tracks: list[Track] = []
+        for t in ordered:
+            tracks.append(Track(
+                id=str(t.get("id", "")),
+                title=t.get("title", "Unknown"),
+                artist=(t.get("user") or {}).get("username", "Unknown"),
+                duration_ms=t.get("duration", 0),
+                url=t.get("permalink_url", ""),
+                cover_url=t.get("artwork_url", "") or "",
+            ))
+        return tracks
+
+    def _fetch_playlist_tracks_ytdlp(self, playlist_url: str) -> list[Track]:
         cmd = [_YT_DLP, "--flat-playlist", "-J", playlist_url] + self._auth_args()
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
