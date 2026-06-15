@@ -87,7 +87,7 @@ class GDriveUploader:
         escaped = name.replace("\\", "\\\\").replace("'", "\\'")
         query = f"name = '{escaped}' and trashed = false"
         if self.folder_id:
-            query += f" and '{self.folder_id}' in parents"
+            query += f" and '{self.folder_id}' in ancestors"
         response = service.files().list(
             q=query, spaces="drive", fields="files(id)", pageSize=1
         ).execute()
