@@ -28,21 +28,33 @@ except Exception as exc:
     print(f"FAILED: {exc}\n")
     sys.exit(1)
 
-print("=== Raw /me/library/all (first page) ===")
-try:
-    data = sc._api_get("/me/library/all?limit=200")
-    coll = data.get("collection", [])
-    print(f"items on first page: {len(coll)}")
-    # Show the distinct shapes so we can see where playlists live.
-    from collections import Counter
-    key_combos = Counter(
-        ",".join(sorted(k for k in it.keys() if it.get(k))) for it in coll
-    )
-    for combo, n in key_combos.most_common():
-        print(f"  {n:3d} x keys: {combo}")
-except Exception as exc:
-    import traceback
-    traceback.print_exc()
+user_id = sc._api_get("/me")["id"]
+print(f"/me id: {user_id}\n")
+
+# Probe every endpoint where playlists might live and report counts.
+probes = [
+    ("created playlists", f"/users/{user_id}/playlists?limit=200"),
+    ("liked playlists", f"/users/{user_id}/playlist_likes?limit=200"),
+    ("reposted playlists", f"/users/{user_id}/playlist_reposts?limit=200"),
+    ("albums", f"/users/{user_id}/albums?limit=200"),
+    ("library all", "/me/library/all?limit=200"),
+    ("library playlists", "/me/library/playlists?limit=200"),
+]
+for label, path in probes:
+    try:
+        data = sc._api_get(path)
+        coll = data.get("collection", data if isinstance(data, list) else [])
+        print(f"=== {label}: {len(coll)} items  ({path}) ===")
+        for it in coll[:25]:
+            # Unwrap library items that nest the playlist.
+            pl = it.get("playlist") or it.get("system_playlist") or it
+            title = pl.get("title", "?")
+            url = pl.get("permalink_url", "")
+            tc = pl.get("track_count", "?")
+            print(f"    {title}  ({tc} tracks)  {url}")
+    except Exception as exc:
+        print(f"=== {label}: FAILED — {exc}  ({path}) ===")
+    print()
 
 print("\n=== Fetching playlists ===")
 playlists = []
