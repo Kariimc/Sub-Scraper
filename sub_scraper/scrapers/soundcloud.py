@@ -61,7 +61,15 @@ class SoundCloudScraper(BaseScraper):
     def _api_get(self, path: str, **params) -> dict:
         import requests
         params["client_id"] = self._get_client_id()
-        headers = {"Authorization": f"OAuth {self.auth_token}"} if self.auth_token else {}
+        # SoundCloud's API v2 returns 403 for requests that don't look like the
+        # web app, so send the same browser-style headers it does.
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Origin": "https://soundcloud.com",
+            "Referer": "https://soundcloud.com/",
+        }
+        if self.auth_token:
+            headers["Authorization"] = f"OAuth {self.auth_token}"
         url = path if path.startswith("http") else f"{_API}{path}"
         r = requests.get(url, params=params, headers=headers, timeout=15)
         r.raise_for_status()
