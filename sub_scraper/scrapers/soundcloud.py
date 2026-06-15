@@ -126,14 +126,14 @@ class SoundCloudScraper(BaseScraper):
         while next_url:
             data = self._api_get(next_url)
             for item in data.get("collection", []):
-                # Real playlists live under "playlist". "system_playlist" items
-                # are SoundCloud's algorithmic /discover/ radio stations, which
-                # aren't downloadable playlists, so we skip them.
-                pl = item.get("playlist")
+                # "playlist" = real playlists the user created/liked.
+                # "system_playlist" = SoundCloud's auto-generated mixes
+                # (Your Mix, Weekly Wave, …). The user opted to include both.
+                pl = item.get("playlist") or item.get("system_playlist")
                 if not pl:
                     continue
                 pid = pl.get("permalink_url")
-                if not pid or "/discover/sets/" in pid or pid in seen:
+                if not pid or pid in seen:
                     continue
                 seen.add(pid)
                 playlists.append({
@@ -166,9 +166,16 @@ class SoundCloudScraper(BaseScraper):
     def fetch_playlist_tracks(self, playlist_url: str) -> list[Track]:
         # Prefer the API when authenticated: it returns full, reliable track
         # metadata. yt-dlp's --flat-playlist often omits titles/uploaders for
-        # SoundCloud sets, which left rows blank.
+        # SoundCloud sets, which left rows blank. Auto-generated mixes use
+        # special URLs the /resolve endpoint can't handle, so fall back to
+        # yt-dlp for those.
         if self.auth_token:
-            return self._fetch_playlist_tracks_api(playlist_url)
+            try:
+                tracks = self._fetch_playlist_tracks_api(playlist_url)
+                if tracks:
+                    return tracks
+            except Exception:
+                pass
         return self._fetch_playlist_tracks_ytdlp(playlist_url)
 
     def _fetch_playlist_tracks_api(self, playlist_url: str) -> list[Track]:
