@@ -126,17 +126,38 @@ class SoundCloudScraper(BaseScraper):
         while next_url:
             data = self._api_get(next_url)
             for item in data.get("collection", []):
-                pl = item.get("playlist") or item.get("system_playlist")
+                # Real playlists live under "playlist". "system_playlist" items
+                # are SoundCloud's algorithmic /discover/ radio stations, which
+                # aren't downloadable playlists, so we skip them.
+                pl = item.get("playlist")
                 if not pl:
                     continue
                 pid = pl.get("permalink_url")
-                if not pid or pid in seen:
+                if not pid or "/discover/sets/" in pid or pid in seen:
                     continue
                 seen.add(pid)
                 playlists.append({
                     "id": pid,
                     "name": pl.get("title", "Unknown"),
                     "total": pl.get("track_count", 0),
+                })
+            next_url = data.get("next_href")
+
+        # Also include playlists the user created themselves (these live under a
+        # separate endpoint and are not part of the library feed).
+        user_id = self._api_get("/me")["id"]
+        next_url = f"/users/{user_id}/playlists?representation=mini&limit=200"
+        while next_url:
+            data = self._api_get(next_url)
+            for p in data.get("collection", []):
+                pid = p.get("permalink_url")
+                if not pid or pid in seen:
+                    continue
+                seen.add(pid)
+                playlists.append({
+                    "id": pid,
+                    "name": p.get("title", "Unknown"),
+                    "total": p.get("track_count", 0),
                 })
             next_url = data.get("next_href")
 
