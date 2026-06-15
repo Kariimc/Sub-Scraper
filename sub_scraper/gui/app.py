@@ -100,6 +100,12 @@ class LibraryPanel(ctk.CTkFrame):
         self._selected: set[str] = set()
         self._log_visible = False
 
+        # Batch progress state (updated only on the main thread).
+        self._dl_total = 0
+        self._dl_done = 0
+        self._dl_failed = 0
+        self._dl_active: dict[str, str] = {}  # track id -> display name
+
         # All worker-thread → GUI updates flow through this queue and are
         # drained on the main thread. tkinter is not thread-safe, so workers
         # must never touch widgets directly.
@@ -108,6 +114,7 @@ class LibraryPanel(ctk.CTkFrame):
         self._build_header()
         self._build_list()
         self._build_log_panel()
+        self._build_status_bar()
         self._build_footer()
 
         self.after(100, self._process_events)
@@ -187,9 +194,24 @@ class LibraryPanel(ctk.CTkFrame):
         self._log_box.pack(fill="x", padx=8, pady=(0, 8))
         self._log_box.configure(state="disabled")
 
+    def _build_status_bar(self) -> None:
+        bar = ctk.CTkFrame(self, fg_color=PANEL_BG, corner_radius=6)
+        bar.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 4))
+        bar.columnconfigure(0, weight=1)
+
+        self._status_bar_lbl = ctk.CTkLabel(
+            bar, text="Ready — no downloads yet", anchor="w",
+            font=FONT_SMALL, text_color=TEXT_SECONDARY,
+        )
+        self._status_bar_lbl.grid(row=0, column=0, sticky="ew", padx=10, pady=(6, 2))
+
+        self._progress_bar = ctk.CTkProgressBar(bar, height=8)
+        self._progress_bar.set(0)
+        self._progress_bar.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 8))
+
     def _build_footer(self) -> None:
         bar = ctk.CTkFrame(self, fg_color="transparent")
-        bar.grid(row=3, column=0, sticky="ew", padx=16, pady=(4, 16))
+        bar.grid(row=4, column=0, sticky="ew", padx=16, pady=(4, 16))
 
         ctk.CTkButton(bar, text="Select All", width=100, command=self._select_all).pack(side="left", padx=(0, 6))
         ctk.CTkButton(bar, text="Deselect All", width=110, command=self._deselect_all).pack(side="left")
@@ -249,20 +271,78 @@ class LibraryPanel(ctk.CTkFrame):
         touch tkinter widgets). Reschedules itself for the life of the panel."""
         try:
             for _ in range(500):  # cap per tick so the UI stays responsive
-                kind, payload = self._events.get_nowait()
+                event = self._events.get_nowait()
+                kind = event[0]
                 if kind == "log":
-                    self._append_log(payload)
+                    self._append_log(event[1])
                 elif kind == "progress":
-                    row = self._rows.get(payload.id)
-                    if row is not None:
-                        row.refresh_status()
+                    self._handle_progress(event[1], event[2])
                 elif kind == "populate":
-                    self._populate(payload)
+                    self._populate(event[1])
                 elif kind == "fetch_error":
-                    self._on_fetch_error(payload)
+                    self._on_fetch_error(event[1])
         except queue.Empty:
             pass
         self.after(100, self._process_events)
+
+    # ------------------------------------------------------------------
+    # Download progress / status bar
+    # ------------------------------------------------------------------
+
+    def _begin_batch(self, total: int) -> None:
+        self._dl_total = total
+        self._dl_done = 0
+        self._dl_failed = 0
+        self._dl_active.clear()
+        self._progress_bar.set(0)
+        self._status_bar_lbl.configure(
+            text=f"Starting {total} download{'s' if total != 1 else ''}…",
+            text_color=INFO,
+        )
+
+    def _handle_progress(self, track: Track, status: DownloadStatus) -> None:
+        row = self._rows.get(track.id)
+        if row is not None:
+            row.refresh_status()
+
+        if status == DownloadStatus.DOWNLOADING:
+            self._dl_active[track.id] = track.display_name
+        elif status in (DownloadStatus.COMPLETE, DownloadStatus.FAILED):
+            self._dl_active.pop(track.id, None)
+            self._dl_done += 1
+            if status == DownloadStatus.FAILED:
+                self._dl_failed += 1
+
+        self._refresh_status_bar()
+
+    def _refresh_status_bar(self) -> None:
+        total = self._dl_total
+        if total == 0:
+            return
+
+        self._progress_bar.set(self._dl_done / total)
+
+        if self._dl_done >= total:
+            ok = total - self._dl_failed
+            msg = f"✓ Finished — {ok} downloaded"
+            if self._dl_failed:
+                msg += f", {self._dl_failed} failed"
+            self._status_bar_lbl.configure(
+                text=msg, text_color=ERROR if self._dl_failed else SUCCESS,
+            )
+            return
+
+        active = list(self._dl_active.values())
+        if active:
+            current = active[0]
+            extra = f"   (+{len(active) - 1} more)" if len(active) > 1 else ""
+        else:
+            current = "preparing…"
+            extra = ""
+        self._status_bar_lbl.configure(
+            text=f"↓  {self._dl_done}/{total}   •   {current}{extra}",
+            text_color=INFO,
+        )
 
     # ------------------------------------------------------------------
     # Library loading
@@ -375,20 +455,27 @@ class LibraryPanel(ctk.CTkFrame):
             if t.status != DownloadStatus.COMPLETE
         ]
 
+    def _start_download(self, tracks: list[Track]) -> None:
+        jobs = self._make_jobs(tracks)
+        if not jobs:
+            messagebox.showinfo("Sub-Scraper", "Those tracks are already downloaded.")
+            return
+        self._maybe_configure_gdrive()
+        self._begin_batch(len(jobs))
+        self._manager.submit_batch(jobs, chunk_size=self._chunk_size())
+
     def _download_selected(self) -> None:
         tracks = [self._rows[tid].track for tid in self._selected if tid in self._rows]
         if not tracks:
             messagebox.showinfo("Sub-Scraper", "No tracks selected.")
             return
-        self._maybe_configure_gdrive()
-        self._manager.submit_batch(self._make_jobs(tracks), chunk_size=self._chunk_size())
+        self._start_download(tracks)
 
     def _download_all(self) -> None:
         if not self._tracks:
             messagebox.showinfo("Sub-Scraper", "Library is empty — load it first.")
             return
-        self._maybe_configure_gdrive()
-        self._manager.submit_batch(self._make_jobs(self._tracks), chunk_size=self._chunk_size())
+        self._start_download(self._tracks)
 
     def _maybe_configure_gdrive(self) -> None:
         if self._config.use_gdrive and self._config.gdrive_credentials_path:
@@ -399,7 +486,8 @@ class LibraryPanel(ctk.CTkFrame):
 
     def _on_progress(self, track: Track) -> None:
         # Called from worker threads — only touch the thread-safe queue.
-        self._events.put(("progress", track))
+        # Snapshot the status now; the track object keeps mutating.
+        self._events.put(("progress", track, track.status))
 
 
 # ---------------------------------------------------------------------------
