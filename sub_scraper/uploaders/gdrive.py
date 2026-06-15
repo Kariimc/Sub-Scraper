@@ -55,17 +55,40 @@ class GDriveUploader:
             return self._service
 
     def upload(self, file_path: str) -> str:
+        """Upload a file to Drive, skipping it if a file with the same name
+        already exists in the target location. Returns the Drive file id, or
+        an empty string when the upload was skipped as a duplicate."""
         from googleapiclient.http import MediaFileUpload
 
         service = self._get_service()
         path = Path(file_path)
-        metadata: dict = {"name": path.name}
-        if self.folder_id:
-            metadata["parents"] = [self.folder_id]
 
-        media = MediaFileUpload(str(path), resumable=True)
+        # httplib2 is not thread-safe, so the duplicate check and the upload
+        # must run under the same lock as one another.
         with self._upload_lock:
+            if self._remote_exists(service, path.name):
+                return ""
+
+            metadata: dict = {"name": path.name}
+            if self.folder_id:
+                metadata["parents"] = [self.folder_id]
+            media = MediaFileUpload(str(path), resumable=True)
             result = service.files().create(
                 body=metadata, media_body=media, fields="id"
             ).execute()
         return result.get("id", "")
+
+    def _remote_exists(self, service: Any, name: str) -> bool:
+        """True if a non-trashed file with this name already exists in the
+        target folder (or anywhere the app can see, when no folder is set).
+
+        Note: the drive.file scope only sees files this app created, which is
+        exactly the set that could be a duplicate of our own uploads."""
+        escaped = name.replace("\\", "\\\\").replace("'", "\\'")
+        query = f"name = '{escaped}' and trashed = false"
+        if self.folder_id:
+            query += f" and '{self.folder_id}' in parents"
+        response = service.files().list(
+            q=query, spaces="drive", fields="files(id)", pageSize=1
+        ).execute()
+        return bool(response.get("files"))

@@ -95,6 +95,8 @@ def run_isolated_download(
 
         # The audio track is the largest matching file (ignores stray artwork).
         src = max(audio, key=lambda p: p.stat().st_size)
+        if src.stat().st_size == 0:
+            raise RuntimeError(f"Download produced an empty file for: {track.display_name}")
         dest = out / src.name
         shutil.move(str(src), str(dest))
         return str(dest)
