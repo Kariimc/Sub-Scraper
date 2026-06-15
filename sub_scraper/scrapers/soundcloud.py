@@ -29,25 +29,34 @@ class SoundCloudScraper(BaseScraper):
             return self._client_id
         import requests
 
-        home = requests.get(
-            "https://soundcloud.com/", timeout=15,
-            headers={"User-Agent": "Mozilla/5.0"},
-        )
+        ua = {"User-Agent": "Mozilla/5.0"}
+        home = requests.get("https://soundcloud.com/", timeout=15, headers=ua)
         home.raise_for_status()
         script_urls = re.findall(r'<script[^>]+src="([^"]+)"', home.text)
-        # The client_id lives in one of the later JS bundles.
+        # The client_id lives in one of the JS bundles, usually a later one.
+        # Match both the JS object form (client_id:"…") and the URL form.
+        patterns = [
+            re.compile(r'client_id\s*:\s*"([0-9a-zA-Z]{32})"'),
+            re.compile(r'client_id=([0-9a-zA-Z]{32})'),
+        ]
         for url in reversed(script_urls):
+            if url.startswith("//"):
+                url = "https:" + url
             if not url.startswith("http"):
                 continue
             try:
-                js = requests.get(url, timeout=15).text
+                js = requests.get(url, timeout=15, headers=ua).text
             except Exception:
                 continue
-            m = re.search(r'[?&"]client_id[=:]"?([0-9a-zA-Z]{32})', js)
-            if m:
-                self._client_id = m.group(1)
-                return self._client_id
-        raise RuntimeError("Could not extract a SoundCloud client_id.")
+            for pat in patterns:
+                m = pat.search(js)
+                if m:
+                    self._client_id = m.group(1)
+                    return self._client_id
+        raise RuntimeError(
+            f"Could not extract a SoundCloud client_id "
+            f"(checked {len(script_urls)} scripts)."
+        )
 
     def _api_get(self, path: str, **params) -> dict:
         import requests
