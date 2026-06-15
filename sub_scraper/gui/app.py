@@ -49,6 +49,7 @@ class TrackRow(ctk.CTkFrame):
 
         self._checkbox = ctk.CTkCheckBox(
             self, variable=self.selected, text="", width=28,
+            onvalue=True, offvalue=False,
             command=lambda: on_toggle(track, self.selected.get()),
         )
         self._checkbox.pack(side="left", padx=(8, 4))
