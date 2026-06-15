@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Virtual environment
+.venv/
+venv/
+
+# App data
+music_downloads/
+*.spotdl
+archive.txt
+
+# Credentials / secrets
+*.json
+!requirements.txt
+*.pkl
+.env
+.env.*
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

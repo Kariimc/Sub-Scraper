@@ -9,6 +9,7 @@ import customtkinter as ctk
 
 from ..core.config import Config
 from ..core.download_manager import DownloadJob, DownloadManager
+from .wizard import SetupWizard
 from ..scrapers.base import DownloadStatus, Track
 from ..scrapers.soundcloud import SoundCloudScraper
 from ..scrapers.spotify import SpotifyScraper
@@ -480,6 +481,17 @@ class App(ctk.CTk):
         self._panels["Library"] = LibraryPanel(content, self._config, self._manager)
         self._panels["Settings"] = SettingsPanel(content, self._config)
 
+        if self._needs_setup():
+            self._panels["Setup"] = SetupWizard(content, self._config, on_complete=self._finish_setup)
+            self._show("Setup")
+        else:
+            self._show("Library")
+
+    def _needs_setup(self) -> bool:
+        return not (self._config.spotify_client_id or self._config.soundcloud_username)
+
+    def _finish_setup(self) -> None:
+        self._panels.pop("Setup", None)
         self._show("Library")
 
     def _show(self, name: str) -> None:
