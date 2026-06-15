@@ -4,23 +4,26 @@ import queue
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
-from typing import Optional
 
 import customtkinter as ctk
 
 from ..core.config import Config
 from ..core.download_manager import DownloadJob, DownloadManager
+from ..core.library_index import DownloadIndex
+from ..core.logging_config import configure_logging
+from .logo import get_ctk_image, set_window_icon
 from .wizard import SetupWizard
 from ..scrapers.base import DownloadStatus, Track
 from ..scrapers.soundcloud import SoundCloudScraper
 from ..scrapers.spotify import SpotifyScraper
 from .styles import (
-    ACCENT, DARK_BG, ERROR, FONT_MEDIUM, FONT_SECTION,
-    FONT_SMALL, FONT_TITLE, HIGHLIGHT, HIGHLIGHT_HOVER,
-    INFO, PANEL_BG, SIDEBAR_BG, SUCCESS, TEXT_PRIMARY, TEXT_SECONDARY,
+    BORDER, DARK_BG, ERROR, FONT_BRAND, FONT_MEDIUM, FONT_MONO,
+    FONT_SECTION, FONT_SMALL, FONT_TITLE, HIGHLIGHT, HIGHLIGHT_HOVER, INFO,
+    NAVY_LIGHT, ORANGE, PANEL_BG, SIDEBAR_BG, SUCCESS, TEXT_ON_NAVY,
+    TEXT_ON_NAVY_MUTED, TEXT_PRIMARY, TEXT_SECONDARY, WHITE,
 )
 
-ctk.set_appearance_mode("dark")
+ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 
 _STATUS_COLOR = {
@@ -43,8 +46,12 @@ _STATUS_ICON = {
 
 class TrackRow(ctk.CTkFrame):
     def __init__(self, master: ctk.CTkScrollableFrame, track: Track, on_toggle: callable) -> None:
-        super().__init__(master, fg_color=PANEL_BG, corner_radius=6)
+        super().__init__(master, fg_color=PANEL_BG, corner_radius=8,
+                         border_width=1, border_color=BORDER)
         self.track = track
+        # True when this track was already on disk at load time — used to hide
+        # it under the "show downloaded" toggle without affecting live results.
+        self.pre_downloaded = False
         self.selected = tk.BooleanVar(value=False)
         self._on_toggle = on_toggle
 
@@ -80,9 +87,6 @@ class TrackRow(ctk.CTkFrame):
         self._on_toggle(self.track, self.selected.get())
 
     def refresh_status(self) -> None:
-        # Keep the checkbox enabled in every state so the user can always
-        # deselect or re-queue a track. Completed tracks are skipped at
-        # download time (_make_jobs), so locking the box was unnecessary.
         self._status_lbl.configure(
             text=_STATUS_ICON[self.track.status],
             text_color=_STATUS_COLOR[self.track.status],
@@ -97,13 +101,14 @@ class TrackRow(ctk.CTkFrame):
 # ---------------------------------------------------------------------------
 
 class LibraryPanel(ctk.CTkFrame):
-    def __init__(self, master, config: Config, manager: DownloadManager) -> None:
+    def __init__(self, master, config: Config, manager: DownloadManager, index: DownloadIndex) -> None:
         super().__init__(master, fg_color="transparent")
         self.rowconfigure(1, weight=1)
         self.columnconfigure(0, weight=1)
 
         self._config = config
         self._manager = manager
+        self._index = index
         self._tracks: list[Track] = []
         self._rows: dict[str, TrackRow] = {}
         self._selected: set[str] = set()
@@ -138,6 +143,10 @@ class LibraryPanel(ctk.CTkFrame):
         hdr = ctk.CTkFrame(self, fg_color="transparent")
         hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 8))
 
+        ctk.CTkLabel(hdr, text="Your Library", font=FONT_TITLE, text_color=TEXT_PRIMARY).pack(
+            anchor="w", pady=(0, 10)
+        )
+
         # Top row: source selector, search, load button
         top = ctk.CTkFrame(hdr, fg_color="transparent")
         top.pack(fill="x")
@@ -153,7 +162,7 @@ class LibraryPanel(ctk.CTkFrame):
         self._load_btn.pack(side="right")
 
         self._search_var = tk.StringVar()
-        self._search_var.trace_add("write", self._filter_rows)
+        self._search_var.trace_add("write", self._refresh_visibility)
         ctk.CTkEntry(top, textvariable=self._search_var, placeholder_text="Search...", width=200).pack(
             side="right", padx=8
         )
@@ -161,9 +170,9 @@ class LibraryPanel(ctk.CTkFrame):
         self._status_lbl = ctk.CTkLabel(top, text="", font=FONT_SMALL, text_color=TEXT_SECONDARY)
         self._status_lbl.pack(side="left", padx=16)
 
-        # Content-mode row: liked songs vs playlist picker
+        # Content-mode row: liked songs vs playlist picker + show-downloaded toggle
         content_row = ctk.CTkFrame(hdr, fg_color="transparent")
-        content_row.pack(fill="x", pady=(6, 0))
+        content_row.pack(fill="x", pady=(8, 0))
 
         self._content_var = tk.StringVar(value="Liked Songs")
         ctk.CTkSegmentedButton(
@@ -178,6 +187,14 @@ class LibraryPanel(ctk.CTkFrame):
             command=self._on_playlist_select, width=280,
         )
         # Not packed until playlists have been fetched
+
+        # Already-downloaded tracks are hidden by default to keep the list to
+        # what's left to grab; this reveals them on demand.
+        self._show_dl_var = tk.BooleanVar(value=not bool(self._config.hide_downloaded))
+        ctk.CTkCheckBox(
+            content_row, text="Show downloaded", variable=self._show_dl_var,
+            font=FONT_SMALL, text_color=TEXT_SECONDARY, command=self._refresh_visibility,
+        ).pack(side="right")
 
     def _build_list(self) -> None:
         self._scroll = ctk.CTkScrollableFrame(self, fg_color=DARK_BG)
@@ -210,7 +227,8 @@ class LibraryPanel(ctk.CTkFrame):
             self._bind_mousewheel(child)
 
     def _build_log_panel(self) -> None:
-        self._log_frame = ctk.CTkFrame(self, fg_color=PANEL_BG, corner_radius=6)
+        self._log_frame = ctk.CTkFrame(self, fg_color=PANEL_BG, corner_radius=8,
+                                       border_width=1, border_color=BORDER)
 
         log_hdr = ctk.CTkFrame(self._log_frame, fg_color="transparent")
         log_hdr.pack(fill="x", padx=8, pady=(6, 2))
@@ -221,14 +239,15 @@ class LibraryPanel(ctk.CTkFrame):
         ).pack(side="right")
 
         self._log_box = ctk.CTkTextbox(
-            self._log_frame, height=140, font=("Consolas", 11),
-            fg_color=DARK_BG, text_color=TEXT_SECONDARY,
+            self._log_frame, height=140, font=FONT_MONO,
+            fg_color=DARK_BG, text_color=TEXT_PRIMARY,
         )
         self._log_box.pack(fill="x", padx=8, pady=(0, 8))
         self._log_box.configure(state="disabled")
 
     def _build_status_bar(self) -> None:
-        bar = ctk.CTkFrame(self, fg_color=PANEL_BG, corner_radius=6)
+        bar = ctk.CTkFrame(self, fg_color=PANEL_BG, corner_radius=8,
+                           border_width=1, border_color=BORDER)
         bar.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 4))
         bar.columnconfigure(0, weight=1)
 
@@ -238,7 +257,7 @@ class LibraryPanel(ctk.CTkFrame):
         )
         self._status_bar_lbl.grid(row=0, column=0, sticky="ew", padx=10, pady=(6, 2))
 
-        self._progress_bar = ctk.CTkProgressBar(bar, height=8)
+        self._progress_bar = ctk.CTkProgressBar(bar, height=8, progress_color=ORANGE)
         self._progress_bar.set(0)
         self._progress_bar.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 8))
 
@@ -249,15 +268,9 @@ class LibraryPanel(ctk.CTkFrame):
         ctk.CTkButton(bar, text="Select All", width=100, command=self._select_all).pack(side="left", padx=(0, 6))
         ctk.CTkButton(bar, text="Deselect All", width=110, command=self._deselect_all).pack(side="left")
 
-        ctk.CTkLabel(bar, text="Chunk:", font=FONT_SMALL, text_color=TEXT_SECONDARY).pack(
-            side="left", padx=(16, 4)
-        )
-        self._chunk_var = tk.StringVar(value=str(self._config.chunk_size))
-        ctk.CTkEntry(bar, textvariable=self._chunk_var, width=64).pack(side="left")
-
         self._log_btn = ctk.CTkButton(
             bar, text="▶ Log", width=70, font=FONT_SMALL,
-            fg_color="transparent", hover_color=ACCENT, text_color=TEXT_SECONDARY,
+            fg_color="transparent", hover_color=BORDER, text_color=TEXT_SECONDARY,
             command=self._toggle_log,
         )
         self._log_btn.pack(side="left", padx=(14, 0))
@@ -267,7 +280,7 @@ class LibraryPanel(ctk.CTkFrame):
         )
         ctk.CTkButton(
             bar, text="Download Selected", width=150,
-            fg_color=HIGHLIGHT, hover_color=HIGHLIGHT_HOVER,
+            fg_color=HIGHLIGHT, hover_color=HIGHLIGHT_HOVER, text_color=WHITE,
             command=self._download_selected,
         ).pack(side="right")
 
@@ -383,6 +396,9 @@ class LibraryPanel(ctk.CTkFrame):
     # Library loading
     # ------------------------------------------------------------------
 
+    def _source_key(self) -> str:
+        return "spotify" if self._source_var.get() == "Spotify" else "soundcloud"
+
     def _on_source_change(self, _: str) -> None:
         self._content_var.set("Liked Songs")
         self._clear()
@@ -474,16 +490,35 @@ class LibraryPanel(ctk.CTkFrame):
         except Exception as exc:
             self._events.put(("fetch_error", str(exc)))
 
+    def _mark_downloaded(self, tracks: list[Track]) -> int:
+        """Flag tracks already on disk (index or matching file) as COMPLETE so
+        they're skipped on download and hidden from the list. Returns the count."""
+        source = self._source_key()
+        count = 0
+        for t in tracks:
+            already = self._index.contains(source, t.id)
+            if not already:
+                match = self._index.file_exists_for(self._config.download_path, t)
+                if match:
+                    t.local_path = match
+                    self._index.record(source, t)
+                    already = True
+            if already:
+                t.status = DownloadStatus.COMPLETE
+                count += 1
+        return count
+
     def _populate(self, tracks: list[Track]) -> None:
         self._clear()
         self._tracks = tracks
+        self._mark_downloaded(tracks)
         for t in tracks:
             row = TrackRow(self._scroll, t, on_toggle=self._on_toggle)
-            row.pack(fill="x", pady=2)
+            row.pre_downloaded = t.status == DownloadStatus.COMPLETE
             self._bind_mousewheel(row)
             self._rows[t.id] = row
         self._load_btn.configure(state="normal", text="Reload")
-        self._status_lbl.configure(text=f"{len(tracks)} tracks", text_color=TEXT_SECONDARY)
+        self._refresh_visibility()
 
     def _clear(self) -> None:
         for w in self._scroll.winfo_children():
@@ -493,7 +528,7 @@ class LibraryPanel(ctk.CTkFrame):
         self._tracks = []
 
     # ------------------------------------------------------------------
-    # Selection
+    # Selection / visibility
     # ------------------------------------------------------------------
 
     def _on_toggle(self, track: Track, selected: bool) -> None:
@@ -503,37 +538,49 @@ class LibraryPanel(ctk.CTkFrame):
             self._selected.discard(track.id)
 
     def _select_all(self) -> None:
+        # Only act on currently-visible rows so hidden/downloaded tracks aren't
+        # silently selected.
         for tid, row in self._rows.items():
-            row.set_selected(True)
-            self._selected.add(tid)
+            if row.winfo_ismapped():
+                row.set_selected(True)
+                self._selected.add(tid)
 
     def _deselect_all(self) -> None:
         for row in self._rows.values():
             row.set_selected(False)
         self._selected.clear()
 
-    def _filter_rows(self, *_) -> None:
-        q = self._search_var.get().lower()
+    def _refresh_visibility(self, *_) -> None:
+        """Single ordered pass: pack visible rows (in track order) and forget the
+        rest. Visibility = matches search AND (not hidden as already-downloaded).
+        """
+        q = self._search_var.get().lower().strip()
+        show_dl = self._show_dl_var.get()
+        hidden_dl = 0
         for row in self._rows.values():
             t = row.track
+            if row.pre_downloaded and not show_dl:
+                row.pack_forget()
+                hidden_dl += 1
+                continue
             match = not q or q in t.title.lower() or q in t.artist.lower()
             if match:
                 row.pack(fill="x", pady=2)
             else:
                 row.pack_forget()
 
+        total = len(self._rows)
+        msg = f"{total} track{'s' if total != 1 else ''}"
+        if hidden_dl:
+            msg += f"  ·  {hidden_dl} downloaded (hidden)"
+        self._status_lbl.configure(text=msg, text_color=TEXT_SECONDARY)
+
     # ------------------------------------------------------------------
     # Downloads
     # ------------------------------------------------------------------
 
-    def _chunk_size(self) -> int:
-        try:
-            return int(self._chunk_var.get())
-        except ValueError:
-            return 0
-
     def _make_jobs(self, tracks: list[Track]) -> list[DownloadJob]:
-        source = "spotify" if self._source_var.get() == "Spotify" else "soundcloud"
+        source = self._source_key()
         return [
             DownloadJob(
                 track=t,
@@ -555,7 +602,7 @@ class LibraryPanel(ctk.CTkFrame):
             return
         self._maybe_configure_gdrive()
         self._begin_batch(len(jobs))
-        self._manager.submit_batch(jobs, chunk_size=self._chunk_size())
+        self._manager.submit_batch(jobs)
 
     def _download_selected(self) -> None:
         tracks = [self._rows[tid].track for tid in self._selected if tid in self._rows]
@@ -588,21 +635,22 @@ class LibraryPanel(ctk.CTkFrame):
 # ---------------------------------------------------------------------------
 
 class SettingsPanel(ctk.CTkScrollableFrame):
-    def __init__(self, master, config: Config) -> None:
+    def __init__(self, master, config: Config, index: DownloadIndex) -> None:
         super().__init__(master, fg_color="transparent")
         self._config = config
+        self._index = index
         self._build()
 
     def _section(self, title: str) -> None:
         ctk.CTkLabel(self, text=title, font=FONT_SECTION, text_color=TEXT_PRIMARY, anchor="w").pack(
             fill="x", padx=16, pady=(20, 2)
         )
-        ctk.CTkFrame(self, height=1, fg_color=ACCENT).pack(fill="x", padx=16, pady=(0, 8))
+        ctk.CTkFrame(self, height=2, fg_color=ORANGE).pack(fill="x", padx=16, pady=(0, 8))
 
     def _field(self, label: str, attr: str, show: str = "", browse: bool = False, browse_file: bool = False) -> None:
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(fill="x", padx=16, pady=3)
-        ctk.CTkLabel(row, text=label, width=190, anchor="w", font=FONT_MEDIUM, text_color=TEXT_PRIMARY).pack(
+        ctk.CTkLabel(row, text=label, width=210, anchor="w", font=FONT_MEDIUM, text_color=TEXT_PRIMARY).pack(
             side="left"
         )
         var = tk.StringVar(value=str(getattr(self._config, attr, "")))
@@ -618,7 +666,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
     def _dropdown(self, label: str, attr: str, choices: list[str]) -> None:
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(fill="x", padx=16, pady=3)
-        ctk.CTkLabel(row, text=label, width=190, anchor="w", font=FONT_MEDIUM, text_color=TEXT_PRIMARY).pack(
+        ctk.CTkLabel(row, text=label, width=210, anchor="w", font=FONT_MEDIUM, text_color=TEXT_PRIMARY).pack(
             side="left"
         )
         var = tk.StringVar(value=str(getattr(self._config, attr, choices[0])))
@@ -647,10 +695,25 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self._field("Download Path", "download_path", browse=True)
         self._dropdown("Format", "output_format", ["mp3", "flac", "m4a", "opus", "ogg"])
         self._dropdown("Quality", "audio_quality", ["128k", "192k", "256k", "320k"])
+
+        self._section("Library")
+        self._checkbox("Hide tracks I've already downloaded", "hide_downloaded")
+        clear_row = ctk.CTkFrame(self, fg_color="transparent")
+        clear_row.pack(fill="x", padx=16, pady=3)
+        ctk.CTkLabel(
+            clear_row, text="Forget download history (re-shows every track)",
+            width=210, anchor="w", font=FONT_SMALL, text_color=TEXT_SECONDARY,
+        ).pack(side="left")
+        ctk.CTkButton(clear_row, text="Clear History", width=120, command=self._clear_history).pack(side="left")
+
+        self._section("Performance & Resilience")
         self._field("Max Concurrent Downloads", "max_concurrent")
-        self._field("Default Chunk Size", "chunk_size")
         self._field("Parallel Fragments / Track", "concurrent_fragments")
         self._field("Retry Limit", "retry_limit")
+        self._field("Circuit-Breaker Threshold", "breaker_threshold")
+        self._field("Circuit-Breaker Cooldown (s)", "breaker_cooldown")
+        self._field("Request Timeout (s)", "request_timeout")
+        self._checkbox("Verify downloads (size + checksum)", "verify_downloads")
 
         self._section("Google Drive")
         self._checkbox("Enable Google Drive Sync", "use_gdrive")
@@ -659,18 +722,30 @@ class SettingsPanel(ctk.CTkScrollableFrame):
 
         ctk.CTkButton(
             self, text="Save Settings", fg_color=HIGHLIGHT, hover_color=HIGHLIGHT_HOVER,
-            command=self._save,
+            text_color=WHITE, command=self._save,
         ).pack(pady=20)
 
+    def _clear_history(self) -> None:
+        count = self._index.clear()
+        messagebox.showinfo("Sub-Scraper", f"Cleared {count} item(s) from download history.")
+
     def _save(self) -> None:
-        for attr, default in (
-            ("max_concurrent", 6),
-            ("chunk_size", 50),
-            ("concurrent_fragments", 4),
-            ("retry_limit", 3),
-        ):
+        int_fields = (
+            ("max_concurrent", 6), ("chunk_size", 50), ("concurrent_fragments", 4),
+            ("retry_limit", 3), ("breaker_threshold", 6), ("io_chunk_bytes", 1 << 17),
+        )
+        float_fields = (
+            ("breaker_cooldown", 30.0), ("request_timeout", 30.0),
+            ("retry_base_delay", 1.0), ("retry_max_delay", 30.0),
+        )
+        for attr, default in int_fields:
             try:
                 setattr(self._config, attr, int(getattr(self._config, attr)))
+            except (ValueError, TypeError):
+                setattr(self._config, attr, default)
+        for attr, default in float_fields:
+            try:
+                setattr(self._config, attr, float(getattr(self._config, attr)))
             except (ValueError, TypeError):
                 setattr(self._config, attr, default)
         self._config.save()
@@ -689,44 +764,64 @@ class App(ctk.CTk):
         super().__init__()
         self.title("Sub-Scraper")
         self.geometry("1120x720")
-        self.minsize(900, 580)
+        self.minsize(940, 600)
         self.configure(fg_color=DARK_BG)
 
         self._config = Config.load()
-        self._manager = DownloadManager(
-            max_workers=int(self._config.max_concurrent),
-            retry_limit=int(self._config.retry_limit),
-        )
+        # Structured logs go to stderr; INFO+ also surface in the GUI log panel
+        # (wired once the Library panel exists).
+        configure_logging()
+
+        self._index = DownloadIndex()
+        self._manager = DownloadManager.from_config(self._config)
+        self._manager.configure_index(self._index)
         self._manager.start()
 
         self._panels: dict[str, ctk.CTkFrame] = {}
         self._nav_btns: dict[str, ctk.CTkButton] = {}
 
+        set_window_icon(self)
         self._build()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build(self) -> None:
-        sidebar = ctk.CTkFrame(self, width=200, fg_color=SIDEBAR_BG, corner_radius=0)
+        sidebar = ctk.CTkFrame(self, width=210, fg_color=SIDEBAR_BG, corner_radius=0)
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
 
-        ctk.CTkLabel(sidebar, text="Sub-Scraper", font=FONT_TITLE, text_color=HIGHLIGHT).pack(pady=(28, 36))
+        # --- Brand lockup: logo badge + wordmark + accent rule -----------
+        brand = ctk.CTkFrame(sidebar, fg_color="transparent")
+        brand.pack(pady=(28, 30))
+        self._logo_img = get_ctk_image(54)
+        if self._logo_img is not None:
+            ctk.CTkLabel(brand, image=self._logo_img, text="").pack()
+        ctk.CTkLabel(brand, text="Sub-Scraper", font=FONT_BRAND, text_color=WHITE).pack(pady=(10, 0))
+        ctk.CTkFrame(brand, height=3, width=50, fg_color=ORANGE, corner_radius=2).pack(pady=(8, 0))
 
         for name in ("Library", "Settings"):
             btn = ctk.CTkButton(
-                sidebar, text=name, anchor="w", width=168,
-                fg_color="transparent", hover_color=ACCENT,
-                font=FONT_MEDIUM, text_color=TEXT_PRIMARY,
+                sidebar, text=name, anchor="w", width=178, height=40,
+                fg_color="transparent", hover_color=NAVY_LIGHT,
+                font=FONT_MEDIUM, text_color=TEXT_ON_NAVY,
                 command=lambda n=name: self._show(n),
             )
             btn.pack(pady=3, padx=16)
             self._nav_btns[name] = btn
 
+        ctk.CTkLabel(
+            sidebar, text="v2.0  ·  async engine", font=FONT_SMALL,
+            text_color=TEXT_ON_NAVY_MUTED,
+        ).pack(side="bottom", pady=16)
+
         content = ctk.CTkFrame(self, fg_color=DARK_BG, corner_radius=0)
         content.pack(side="left", fill="both", expand=True)
 
-        self._panels["Library"] = LibraryPanel(content, self._config, self._manager)
-        self._panels["Settings"] = SettingsPanel(content, self._config)
+        self._panels["Library"] = LibraryPanel(content, self._config, self._manager, self._index)
+        self._panels["Settings"] = SettingsPanel(content, self._config, self._index)
+
+        # Now that the Library panel (and its thread-safe log sink) exists, route
+        # structured INFO logs into the in-app Download Log too.
+        configure_logging(gui_sink=self._panels["Library"]._on_log)
 
         if self._needs_setup():
             self._panels["Setup"] = SetupWizard(content, self._config, on_complete=self._finish_setup)
@@ -746,7 +841,7 @@ class App(ctk.CTk):
             p.pack_forget()
         self._panels[name].pack(fill="both", expand=True)
         for n, btn in self._nav_btns.items():
-            btn.configure(fg_color=ACCENT if n == name else "transparent")
+            btn.configure(fg_color=NAVY_LIGHT if n == name else "transparent")
 
     def _on_close(self) -> None:
         self._manager.stop()

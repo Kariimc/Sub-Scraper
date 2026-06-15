@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Sub-Scraper">
+  <defs>
+    <linearGradient id="badge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1565c0"/>
+      <stop offset="1" stop-color="#ff7a18"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#001432" flood-opacity="0.42"/>
+    </filter>
+  </defs>
+
+  <rect x="26" y="26" width="460" height="460" rx="115" fill="url(#badge)"/>
+
+  <g fill="#ffffff" filter="url(#shadow)">
+    <!-- Equalizer bars (audio) -->
+    <rect x="124" y="154" width="37" height="82"  rx="18"/>
+    <rect x="181" y="113" width="37" height="123" rx="18"/>
+    <rect x="238" y="62"  width="37" height="174" rx="18"/>
+    <rect x="295" y="123" width="37" height="113" rx="18"/>
+    <rect x="352" y="159" width="37" height="77"  rx="18"/>
+
+    <!-- Download arrow (download) -->
+    <rect x="234" y="256" width="44" height="72" rx="13"/>
+    <polygon points="185,317 327,317 256,410"/>
+  </g>
+</svg>

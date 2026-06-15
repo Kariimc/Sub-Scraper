@@ -2,15 +2,20 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Optional
 
-from .base import BaseScraper, Track, run_isolated_download, ytdlp_perf_flags
+from .base import BaseScraper, BuildCmd, Track, ytdlp_perf_flags
+
+if TYPE_CHECKING:
+    import requests as _requests
 
 _YT_DLP = "yt-dlp"
 _API = "https://api-v2.soundcloud.com"
 
 
 class SoundCloudScraper(BaseScraper):
+    log_prefix = "[yt-dlp]"
+
     def __init__(
         self, auth_token: str = "", username: str = "", concurrent_fragments: int = 4
     ) -> None:
@@ -18,6 +23,30 @@ class SoundCloudScraper(BaseScraper):
         self.username = username
         self.concurrent_fragments = concurrent_fragments
         self._client_id = ""
+        self._session: "Optional[_requests.Session]" = None
+
+    @property
+    def session(self) -> "_requests.Session":
+        """A persistent, pooled requests session for metadata API calls.
+
+        Reusing one session keeps the TCP/TLS connection to SoundCloud's API
+        alive across the dozens of calls a playlist sweep makes, instead of
+        re-handshaking each time."""
+        if self._session is None:
+            import requests
+            from requests.adapters import HTTPAdapter
+
+            sess = requests.Session()
+            adapter = HTTPAdapter(pool_connections=8, pool_maxsize=8, max_retries=2)
+            sess.mount("https://", adapter)
+            sess.mount("http://", adapter)
+            sess.headers.update({
+                "User-Agent": "Mozilla/5.0",
+                "Origin": "https://soundcloud.com",
+                "Referer": "https://soundcloud.com/",
+            })
+            self._session = sess
+        return self._session
 
     def _auth_args(self) -> list[str]:
         if self.auth_token:
@@ -30,10 +59,9 @@ class SoundCloudScraper(BaseScraper):
         OAuth token is supplied."""
         if self._client_id:
             return self._client_id
-        import requests
 
         ua = {"User-Agent": "Mozilla/5.0"}
-        home = requests.get("https://soundcloud.com/", timeout=15, headers=ua)
+        home = self.session.get("https://soundcloud.com/", timeout=15, headers=ua)
         home.raise_for_status()
         script_urls = re.findall(r'<script[^>]+src="([^"]+)"', home.text)
         # The client_id lives in one of the JS bundles, usually a later one.
@@ -48,7 +76,7 @@ class SoundCloudScraper(BaseScraper):
             if not url.startswith("http"):
                 continue
             try:
-                js = requests.get(url, timeout=15, headers=ua).text
+                js = self.session.get(url, timeout=15, headers=ua).text
             except Exception:
                 continue
             for pat in patterns:
@@ -62,19 +90,12 @@ class SoundCloudScraper(BaseScraper):
         )
 
     def _api_get(self, path: str, **params) -> dict:
-        import requests
         params["client_id"] = self._get_client_id()
-        # SoundCloud's API v2 returns 403 for requests that don't look like the
-        # web app, so send the same browser-style headers it does.
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Origin": "https://soundcloud.com",
-            "Referer": "https://soundcloud.com/",
-        }
-        if self.auth_token:
-            headers["Authorization"] = f"OAuth {self.auth_token}"
+        # The session already carries browser-style headers (User-Agent/Origin/
+        # Referer) that SoundCloud's API v2 requires; add auth per-call.
+        headers = {"Authorization": f"OAuth {self.auth_token}"} if self.auth_token else None
         url = path if path.startswith("http") else f"{_API}{path}"
-        r = requests.get(url, params=params, headers=headers, timeout=15)
+        r = self.session.get(url, params=params, headers=headers, timeout=15)
         r.raise_for_status()
         return r.json()
 
@@ -235,14 +256,9 @@ class SoundCloudScraper(BaseScraper):
             ))
         return tracks
 
-    def download(
-        self,
-        track: Track,
-        output_dir: str,
-        quality: str,
-        fmt: str,
-        on_log: Optional[Callable[[str], None]] = None,
-    ) -> str:
+    def download_command(
+        self, track: Track, output_dir: str, quality: str, fmt: str
+    ) -> BuildCmd:
         def build_cmd(tmp: Path) -> list:
             template = str(tmp / "%(uploader)s - %(title)s.%(ext)s")
             return [
@@ -257,4 +273,4 @@ class SoundCloudScraper(BaseScraper):
                 track.url,
             ] + ytdlp_perf_flags(self.concurrent_fragments) + self._auth_args()
 
-        return run_isolated_download(build_cmd, output_dir, track, "[yt-dlp]", on_log)
+        return build_cmd

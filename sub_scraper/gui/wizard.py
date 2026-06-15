@@ -8,9 +8,10 @@ from typing import Callable
 import customtkinter as ctk
 
 from ..core.config import Config
+from .logo import get_ctk_image
 from .styles import (
-    ACCENT, FONT_MEDIUM, FONT_SMALL, FONT_TITLE,
-    HIGHLIGHT, HIGHLIGHT_HOVER, TEXT_PRIMARY, TEXT_SECONDARY,
+    BLUE, BLUE_HOVER, BORDER, FONT_BRAND, FONT_MEDIUM, FONT_SMALL, FONT_TITLE,
+    HIGHLIGHT, HIGHLIGHT_HOVER, TEXT_PRIMARY, TEXT_SECONDARY, WHITE,
 )
 
 _STEPS = ["Spotify", "SoundCloud", "Output", "Ready"]
@@ -23,9 +24,17 @@ class SetupWizard(ctk.CTkFrame):
         self._on_complete = on_complete
         self._step = 0
 
+        # Brand lockup at the top of onboarding.
+        brand = ctk.CTkFrame(self, fg_color="transparent")
+        brand.pack(pady=(36, 0))
+        self._logo_img = get_ctk_image(48)
+        if self._logo_img is not None:
+            ctk.CTkLabel(brand, image=self._logo_img, text="").pack(side="left", padx=(0, 12))
+        ctk.CTkLabel(brand, text="Sub-Scraper", font=FONT_BRAND, text_color=TEXT_PRIMARY).pack(side="left")
+
         # Progress bar area
         self._prog_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self._prog_frame.pack(fill="x", padx=60, pady=(40, 0))
+        self._prog_frame.pack(fill="x", padx=60, pady=(20, 0))
 
         # Content area
         self._content = ctk.CTkFrame(self, fg_color="transparent")
@@ -37,14 +46,15 @@ class SetupWizard(ctk.CTkFrame):
 
         self._back_btn = ctk.CTkButton(
             nav, text="← Back", width=110,
-            fg_color="transparent", border_width=1,
+            fg_color="transparent", border_width=1, border_color=BORDER,
+            text_color=TEXT_PRIMARY, hover_color=BORDER,
             command=self._prev,
         )
         self._back_btn.pack(side="left")
 
         self._next_btn = ctk.CTkButton(
             nav, text="Next →", width=130,
-            fg_color=HIGHLIGHT, hover_color=HIGHLIGHT_HOVER,
+            fg_color=HIGHLIGHT, hover_color=HIGHLIGHT_HOVER, text_color=WHITE,
             command=self._next,
         )
         self._next_btn.pack(side="right")
@@ -129,7 +139,7 @@ class SetupWizard(ctk.CTkFrame):
     def _link_btn(self, label: str, url: str) -> None:
         ctk.CTkButton(
             self._content, text=label, width=240, height=32,
-            fg_color=ACCENT, hover_color="#2a3a5e",
+            fg_color=BLUE, hover_color=BLUE_HOVER, text_color=WHITE,
             command=lambda: webbrowser.open(url),
         ).pack(anchor="w", pady=(4, 16))
 

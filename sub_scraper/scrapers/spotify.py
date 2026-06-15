@@ -1,16 +1,18 @@
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
-from .base import BaseScraper, Track, run_isolated_download, ytdlp_perf_args_str
+from .base import BaseScraper, BuildCmd, Track, ytdlp_perf_args_str
 
 _SCOPE = "user-library-read playlist-read-private"
 _CACHE = str(Path.home() / ".sub_scraper" / ".spotify_cache")
 
 
 class SpotifyScraper(BaseScraper):
+    log_prefix = "[spotDL]"
+
     def __init__(
         self, client_id: str, client_secret: str, concurrent_fragments: int = 4
     ) -> None:
@@ -83,14 +85,9 @@ class SpotifyScraper(BaseScraper):
             cover_url=images[0].get("url", "") if images else "",
         )
 
-    def download(
-        self,
-        track: Track,
-        output_dir: str,
-        quality: str,
-        fmt: str,
-        on_log: Optional[Callable[[str], None]] = None,
-    ) -> str:
+    def download_command(
+        self, track: Track, output_dir: str, quality: str, fmt: str
+    ) -> BuildCmd:
         def build_cmd(tmp: Path) -> list:
             template = str(tmp / "{artist} - {title}.{output-ext}")
             return [
@@ -106,4 +103,4 @@ class SpotifyScraper(BaseScraper):
                 "--yt-dlp-args", ytdlp_perf_args_str(self.concurrent_fragments),
             ]
 
-        return run_isolated_download(build_cmd, output_dir, track, "[spotDL]", on_log)
+        return build_cmd
