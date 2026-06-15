@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import queue
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -99,10 +100,17 @@ class LibraryPanel(ctk.CTkFrame):
         self._selected: set[str] = set()
         self._log_visible = False
 
+        # All worker-thread → GUI updates flow through this queue and are
+        # drained on the main thread. tkinter is not thread-safe, so workers
+        # must never touch widgets directly.
+        self._events: queue.Queue = queue.Queue()
+
         self._build_header()
         self._build_list()
         self._build_log_panel()
         self._build_footer()
+
+        self.after(100, self._process_events)
 
     # ------------------------------------------------------------------
     # Layout builders
@@ -134,6 +142,32 @@ class LibraryPanel(ctk.CTkFrame):
     def _build_list(self) -> None:
         self._scroll = ctk.CTkScrollableFrame(self, fg_color=DARK_BG)
         self._scroll.grid(row=1, column=0, sticky="nsew", padx=16, pady=4)
+        self._bind_mousewheel(self._scroll)
+
+    # ------------------------------------------------------------------
+    # Mouse-wheel scrolling
+    # ------------------------------------------------------------------
+
+    def _scroll_canvas(self):
+        return getattr(self._scroll, "_parent_canvas", None)
+
+    def _on_mousewheel(self, event) -> None:
+        canvas = self._scroll_canvas()
+        if canvas is None:
+            return
+        if event.num == 4:            # Linux scroll up
+            canvas.yview_scroll(-1, "units")
+        elif event.num == 5:          # Linux scroll down
+            canvas.yview_scroll(1, "units")
+        elif event.delta:             # Windows / macOS
+            canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+
+    def _bind_mousewheel(self, widget) -> None:
+        widget.bind("<MouseWheel>", self._on_mousewheel, add="+")
+        widget.bind("<Button-4>", self._on_mousewheel, add="+")
+        widget.bind("<Button-5>", self._on_mousewheel, add="+")
+        for child in widget.winfo_children():
+            self._bind_mousewheel(child)
 
     def _build_log_panel(self) -> None:
         self._log_frame = ctk.CTkFrame(self, fg_color=PANEL_BG, corner_radius=6)
@@ -207,7 +241,28 @@ class LibraryPanel(ctk.CTkFrame):
         self._log_box.configure(state="disabled")
 
     def _on_log(self, line: str) -> None:
-        self.after(0, lambda l=line: self._append_log(l))
+        # Called from worker threads — only touch the thread-safe queue.
+        self._events.put(("log", line))
+
+    def _process_events(self) -> None:
+        """Drain worker events on the main thread (the only thread allowed to
+        touch tkinter widgets). Reschedules itself for the life of the panel."""
+        try:
+            for _ in range(500):  # cap per tick so the UI stays responsive
+                kind, payload = self._events.get_nowait()
+                if kind == "log":
+                    self._append_log(payload)
+                elif kind == "progress":
+                    row = self._rows.get(payload.id)
+                    if row is not None:
+                        row.refresh_status()
+                elif kind == "populate":
+                    self._populate(payload)
+                elif kind == "fetch_error":
+                    self._on_fetch_error(payload)
+        except queue.Empty:
+            pass
+        self.after(100, self._process_events)
 
     # ------------------------------------------------------------------
     # Library loading
@@ -238,9 +293,9 @@ class LibraryPanel(ctk.CTkFrame):
                 )
                 tracks = scraper.fetch_library()
                 self._manager.configure_soundcloud(scraper)
-            self.after(0, lambda: self._populate(tracks))
+            self._events.put(("populate", tracks))
         except Exception as exc:
-            self.after(0, lambda: self._on_fetch_error(str(exc)))
+            self._events.put(("fetch_error", str(exc)))
 
     def _on_fetch_error(self, msg: str) -> None:
         self._load_btn.configure(state="normal", text="Load Library")
@@ -252,6 +307,7 @@ class LibraryPanel(ctk.CTkFrame):
         for t in tracks:
             row = TrackRow(self._scroll, t, on_toggle=self._on_toggle)
             row.pack(fill="x", pady=2)
+            self._bind_mousewheel(row)
             self._rows[t.id] = row
         self._load_btn.configure(state="normal", text="Reload")
         self._status_lbl.configure(text=f"{len(tracks)} tracks", text_color=TEXT_SECONDARY)
@@ -342,8 +398,8 @@ class LibraryPanel(ctk.CTkFrame):
             )
 
     def _on_progress(self, track: Track) -> None:
-        if track.id in self._rows:
-            self.after(0, self._rows[track.id].refresh_status)
+        # Called from worker threads — only touch the thread-safe queue.
+        self._events.put(("progress", track))
 
 
 # ---------------------------------------------------------------------------
