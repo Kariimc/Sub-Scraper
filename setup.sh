@@ -74,6 +74,52 @@ else
     esac
 fi
 
+# ── aria2c (optional — big multi-connection download speed boost) ──────────────
+echo ""
+if command -v aria2c &>/dev/null; then
+    echo "✓ aria2c found (fast multi-connection downloads enabled)"
+else
+    echo "→ aria2c not found — attempting install (optional speed boost)..."
+    set +e
+    OS="$(uname -s)"
+    if [ "$OS" = "Darwin" ] && command -v brew &>/dev/null; then
+        brew install aria2
+    elif command -v apt-get &>/dev/null; then
+        sudo apt-get install -y aria2
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y aria2
+    elif command -v pacman &>/dev/null && [ -w /usr ]; then
+        sudo pacman -S --noconfirm aria2
+    fi
+
+    # Fallback for read-only systems (Steam Deck / SteamOS): a static binary in
+    # the venv. No root, on PATH via run.sh, untouched by OS updates.
+    # Source: github.com/q3aql/aria2-static-builds (third-party static builds).
+    if ! command -v aria2c &>/dev/null && [ "$OS" = "Linux" ]; then
+        echo "→ Installing a local static aria2c into .venv/bin ..."
+        ARIA_VER="1.37.0"
+        ARIA_NAME="aria2-${ARIA_VER}-linux-gnu-64bit-build1"
+        ARIA_URL="https://github.com/q3aql/aria2-static-builds/releases/download/v${ARIA_VER}/${ARIA_NAME}.tar.bz2"
+        TMP="$(mktemp -d)"
+        if curl -fsSL "$ARIA_URL" -o "$TMP/aria2.tar.bz2" && tar -xjf "$TMP/aria2.tar.bz2" -C "$TMP"; then
+            ARIA_BIN="$(find "$TMP" -name aria2c -type f | head -1)"
+            if [ -n "$ARIA_BIN" ]; then
+                cp "$ARIA_BIN" .venv/bin/aria2c && chmod +x .venv/bin/aria2c
+                echo "   (from $ARIA_URL)"
+            fi
+        fi
+        rm -rf "$TMP"
+    fi
+    set -e
+
+    if command -v aria2c &>/dev/null; then
+        echo "✓ aria2c installed"
+    else
+        echo "⚠  Could not auto-install aria2c — downloads still work (yt-dlp native)."
+        echo "   The app simply runs without the extra speed boost."
+    fi
+fi
+
 echo ""
 echo "========================================"
 echo "  Setup complete!"
