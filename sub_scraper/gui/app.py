@@ -119,6 +119,8 @@ class LibraryPanel(ctk.CTkFrame):
         # drained on the main thread. tkinter is not thread-safe, so workers
         # must never touch widgets directly.
         self._events: queue.Queue = queue.Queue()
+        self._playlists: list[dict] = []
+        self._scraper = None
 
         self._build_header()
         self._build_list()
@@ -136,24 +138,46 @@ class LibraryPanel(ctk.CTkFrame):
         hdr = ctk.CTkFrame(self, fg_color="transparent")
         hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 8))
 
+        # Top row: source selector, search, load button
+        top = ctk.CTkFrame(hdr, fg_color="transparent")
+        top.pack(fill="x")
+
         self._source_var = tk.StringVar(value="Spotify")
         ctk.CTkSegmentedButton(
-            hdr, values=["Spotify", "SoundCloud"],
+            top, values=["Spotify", "SoundCloud"],
             variable=self._source_var,
             command=self._on_source_change,
         ).pack(side="left")
 
-        self._load_btn = ctk.CTkButton(hdr, text="Load Library", width=130, command=self._load_library)
+        self._load_btn = ctk.CTkButton(top, text="Load Library", width=130, command=self._load_library)
         self._load_btn.pack(side="right")
 
         self._search_var = tk.StringVar()
         self._search_var.trace_add("write", self._filter_rows)
-        ctk.CTkEntry(hdr, textvariable=self._search_var, placeholder_text="Search...", width=200).pack(
+        ctk.CTkEntry(top, textvariable=self._search_var, placeholder_text="Search...", width=200).pack(
             side="right", padx=8
         )
 
-        self._status_lbl = ctk.CTkLabel(hdr, text="", font=FONT_SMALL, text_color=TEXT_SECONDARY)
+        self._status_lbl = ctk.CTkLabel(top, text="", font=FONT_SMALL, text_color=TEXT_SECONDARY)
         self._status_lbl.pack(side="left", padx=16)
+
+        # Content-mode row: liked songs vs playlist picker
+        content_row = ctk.CTkFrame(hdr, fg_color="transparent")
+        content_row.pack(fill="x", pady=(6, 0))
+
+        self._content_var = tk.StringVar(value="Liked Songs")
+        ctk.CTkSegmentedButton(
+            content_row, values=["Liked Songs", "Playlists"],
+            variable=self._content_var,
+            command=self._on_content_change,
+        ).pack(side="left")
+
+        self._playlist_var = tk.StringVar(value="")
+        self._playlist_menu = ctk.CTkOptionMenu(
+            content_row, values=[""], variable=self._playlist_var,
+            command=self._on_playlist_select, width=280,
+        )
+        # Not packed until playlists have been fetched
 
     def _build_list(self) -> None:
         self._scroll = ctk.CTkScrollableFrame(self, fg_color=DARK_BG)
@@ -288,6 +312,8 @@ class LibraryPanel(ctk.CTkFrame):
                     self._handle_progress(event[1], event[2])
                 elif kind == "populate":
                     self._populate(event[1])
+                elif kind == "playlists":
+                    self._on_playlists_loaded(event[1], event[2])
                 elif kind == "fetch_error":
                     self._on_fetch_error(event[1])
         except queue.Empty:
@@ -358,37 +384,90 @@ class LibraryPanel(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _on_source_change(self, _: str) -> None:
+        self._content_var.set("Liked Songs")
         self._clear()
+        self._playlists = []
+        self._scraper = None
         self._status_lbl.configure(text="")
+        self._playlist_menu.pack_forget()
+        self._load_btn.configure(text="Load Library")
 
     def _load_library(self) -> None:
+        # In playlist mode, once playlists are loaded the reload button
+        # re-fetches the currently selected playlist's tracks instead of
+        # re-fetching the playlist list.
+        if self._content_var.get() == "Playlists" and self._playlists and self._playlist_var.get():
+            self._on_playlist_select(self._playlist_var.get())
+            return
         self._load_btn.configure(state="disabled", text="Loading…")
-        self._status_lbl.configure(text="Fetching library…", text_color=TEXT_SECONDARY)
+        self._status_lbl.configure(text="Fetching…", text_color=TEXT_SECONDARY)
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self) -> None:
         try:
-            if self._source_var.get() == "Spotify":
+            source = self._source_var.get()
+            if source == "Spotify":
                 scraper = SpotifyScraper(
                     self._config.spotify_client_id,
                     self._config.spotify_client_secret,
                 )
-                tracks = scraper.fetch_library()
                 self._manager.configure_spotify(scraper)
             else:
                 scraper = SoundCloudScraper(
                     auth_token=self._config.soundcloud_auth_token,
                     username=self._config.soundcloud_username,
                 )
-                tracks = scraper.fetch_library()
                 self._manager.configure_soundcloud(scraper)
-            self._events.put(("populate", tracks))
+
+            if self._content_var.get() == "Playlists":
+                playlists = scraper.fetch_playlists()
+                self._events.put(("playlists", playlists, scraper))
+            else:
+                tracks = scraper.fetch_library()
+                self._events.put(("populate", tracks))
         except Exception as exc:
             self._events.put(("fetch_error", str(exc)))
 
     def _on_fetch_error(self, msg: str) -> None:
         self._load_btn.configure(state="normal", text="Load Library")
         self._status_lbl.configure(text=f"Error: {msg}", text_color=ERROR)
+
+    def _on_content_change(self, value: str) -> None:
+        self._clear()
+        self._playlists = []
+        self._scraper = None
+        self._status_lbl.configure(text="")
+        self._playlist_menu.pack_forget()
+        self._load_btn.configure(text="Load Library")
+
+    def _on_playlists_loaded(self, playlists: list[dict], scraper) -> None:
+        self._playlists = playlists
+        self._scraper = scraper
+        if not playlists:
+            self._load_btn.configure(state="normal", text="Load Library")
+            self._status_lbl.configure(text="No playlists found", text_color=ERROR)
+            return
+        names = [p["name"] for p in playlists]
+        self._playlist_menu.configure(values=names)
+        self._playlist_var.set(names[0])
+        self._playlist_menu.pack(side="left", padx=(12, 0))
+        self._on_playlist_select(names[0])
+
+    def _on_playlist_select(self, name: str) -> None:
+        pl = next((p for p in self._playlists if p["name"] == name), None)
+        if pl is None or self._scraper is None:
+            return
+        self._load_btn.configure(state="disabled", text="Loading…")
+        self._status_lbl.configure(text=f"Fetching "{name}"…", text_color=TEXT_SECONDARY)
+        pid = pl["id"]
+        threading.Thread(target=self._fetch_playlist_tracks, args=(pid,), daemon=True).start()
+
+    def _fetch_playlist_tracks(self, playlist_id: str) -> None:
+        try:
+            tracks = self._scraper.fetch_playlist_tracks(playlist_id)
+            self._events.put(("populate", tracks))
+        except Exception as exc:
+            self._events.put(("fetch_error", str(exc)))
 
     def _populate(self, tracks: list[Track]) -> None:
         self._clear()
