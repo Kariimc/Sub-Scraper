@@ -46,13 +46,17 @@ class TrackRow(ctk.CTkFrame):
         super().__init__(master, fg_color=PANEL_BG, corner_radius=6)
         self.track = track
         self.selected = tk.BooleanVar(value=False)
+        self._on_toggle = on_toggle
 
         self._checkbox = ctk.CTkCheckBox(
             self, variable=self.selected, text="", width=28,
             onvalue=True, offvalue=False,
-            command=lambda: on_toggle(track, self.selected.get()),
         )
         self._checkbox.pack(side="left", padx=(8, 4))
+        # Track selection via the variable's trace rather than the checkbox
+        # command: this fires for clicks, Select All and Deselect All alike,
+        # and reliably reports both select AND deselect.
+        self.selected.trace_add("write", self._notify_toggle)
 
         info = ctk.CTkFrame(self, fg_color="transparent")
         info.pack(side="left", fill="x", expand=True, pady=6)
@@ -71,6 +75,9 @@ class TrackRow(ctk.CTkFrame):
             text_color=_STATUS_COLOR[track.status], width=28,
         )
         self._status_lbl.pack(side="right", padx=4)
+
+    def _notify_toggle(self, *_) -> None:
+        self._on_toggle(self.track, self.selected.get())
 
     def refresh_status(self) -> None:
         self._status_lbl.configure(
