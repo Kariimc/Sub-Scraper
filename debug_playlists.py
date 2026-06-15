@@ -28,7 +28,23 @@ except Exception as exc:
     print(f"FAILED: {exc}\n")
     sys.exit(1)
 
-print("=== Fetching playlists ===")
+print("=== Raw /me/library/all (first page) ===")
+try:
+    data = sc._api_get("/me/library/all?limit=200")
+    coll = data.get("collection", [])
+    print(f"items on first page: {len(coll)}")
+    # Show the distinct shapes so we can see where playlists live.
+    from collections import Counter
+    key_combos = Counter(
+        ",".join(sorted(k for k in it.keys() if it.get(k))) for it in coll
+    )
+    for combo, n in key_combos.most_common():
+        print(f"  {n:3d} x keys: {combo}")
+except Exception as exc:
+    import traceback
+    traceback.print_exc()
+
+print("\n=== Fetching playlists ===")
 try:
     playlists = sc.fetch_playlists()
     print(f"Found {len(playlists)} playlists:")

@@ -110,24 +110,33 @@ class SoundCloudScraper(BaseScraper):
 
     def fetch_playlists(self) -> list[dict]:
         """List the authenticated user's playlists via the SoundCloud API v2.
-        Requires auth_token; sees private/secret sets that yt-dlp cannot."""
+        Requires auth_token; sees private/secret sets that yt-dlp cannot.
+
+        Pulls from the user's full library (/me/library/all), which contains
+        both playlists they created and playlists they liked/saved — each
+        library item carries the playlist under a "playlist" key."""
         if not self.auth_token:
             raise ValueError(
                 "SoundCloud auth token is required to list playlists. Add it in Settings."
             )
-        user_id = self._api_get("/me")["id"]
 
         playlists: list[dict] = []
-        next_url: Optional[str] = (
-            f"/users/{user_id}/playlists?representation=mini&limit=200"
-        )
+        seen: set[str] = set()
+        next_url: Optional[str] = "/me/library/all?limit=200"
         while next_url:
             data = self._api_get(next_url)
-            for p in data.get("collection", []):
+            for item in data.get("collection", []):
+                pl = item.get("playlist") or item.get("system_playlist")
+                if not pl:
+                    continue
+                pid = pl.get("permalink_url")
+                if not pid or pid in seen:
+                    continue
+                seen.add(pid)
                 playlists.append({
-                    "id": p["permalink_url"],
-                    "name": p["title"],
-                    "total": p.get("track_count", 0),
+                    "id": pid,
+                    "name": pl.get("title", "Unknown"),
+                    "total": pl.get("track_count", 0),
                 })
             next_url = data.get("next_href")
 
