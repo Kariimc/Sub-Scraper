@@ -458,7 +458,7 @@ class LibraryPanel(ctk.CTkFrame):
         if pl is None or self._scraper is None:
             return
         self._load_btn.configure(state="disabled", text="Loading…")
-        self._status_lbl.configure(text=f"Fetching "{name}"…", text_color=TEXT_SECONDARY)
+        self._status_lbl.configure(text=f"Fetching '{name}'…", text_color=TEXT_SECONDARY)
         pid = pl["id"]
         threading.Thread(target=self._fetch_playlist_tracks, args=(pid,), daemon=True).start()
 
