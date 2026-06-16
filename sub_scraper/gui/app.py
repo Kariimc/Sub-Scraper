@@ -3,6 +3,7 @@ from __future__ import annotations
 import queue
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -25,6 +26,14 @@ from .styles import (
 
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
+
+_RENDER_BATCH = 50  # rows created per after(0) tick during library load
+
+
+def _norm(text: str) -> str:
+    """Case-fold + alphanumeric-only normalisation (mirrors library_index._normalise)."""
+    keep = [ch.lower() for ch in text if ch.isalnum() or ch.isspace()]
+    return " ".join("".join(keep).split())
 
 _STATUS_COLOR = {
     DownloadStatus.PENDING: TEXT_SECONDARY,
@@ -126,6 +135,7 @@ class LibraryPanel(ctk.CTkFrame):
         self._events: queue.Queue = queue.Queue()
         self._playlists: list[dict] = []
         self._scraper = None
+        self._populate_gen = 0  # incremented per load; cancels stale chunk renders
 
         self._build_header()
         self._build_list()
@@ -492,13 +502,34 @@ class LibraryPanel(ctk.CTkFrame):
 
     def _mark_downloaded(self, tracks: list[Track]) -> int:
         """Flag tracks already on disk (index or matching file) as COMPLETE so
-        they're skipped on download and hidden from the list. Returns the count."""
+        they're skipped on download and hidden from the list. Returns the count.
+
+        The download directory is scanned exactly once into a normalised-stem
+        dict so the overall complexity is O(N+M) rather than O(N×M) — avoids
+        freezing when N (tracks) and M (existing files) are both large.
+        """
         source = self._source_key()
+
+        # One-shot directory scan: normalised stem → absolute path.
+        dir_map: dict[str, str] = {}
+        directory = Path(self._config.download_path)
+        if directory.is_dir():
+            for entry in directory.iterdir():
+                if entry.is_file() and not entry.name.startswith("."):
+                    dir_map[_norm(entry.stem)] = str(entry)
+
         count = 0
         for t in tracks:
             already = self._index.contains(source, t.id)
             if not already:
-                match = self._index.file_exists_for(self._config.download_path, t)
+                wanted = _norm(f"{t.artist} - {t.title}")
+                title_only = _norm(t.title)
+                match = dir_map.get(wanted)
+                if match is None and len(title_only) > 4:
+                    match = next(
+                        (p for stem, p in dir_map.items() if stem.endswith(title_only)),
+                        None,
+                    )
                 if match:
                     t.local_path = match
                     self._index.record(source, t)
@@ -512,13 +543,39 @@ class LibraryPanel(ctk.CTkFrame):
         self._clear()
         self._tracks = tracks
         self._mark_downloaded(tracks)
-        for t in tracks:
+        # Bump the generation counter so any in-progress chunk render from a
+        # previous load stops without touching the now-cleared widget dict.
+        self._populate_gen += 1
+        total = len(tracks)
+        if total == 0:
+            self._load_btn.configure(state="normal", text="Reload")
+            self._refresh_visibility()
+            return
+        self._load_btn.configure(state="disabled", text="Loading…")
+        self._status_lbl.configure(
+            text=f"Rendering {total} tracks…", text_color=TEXT_SECONDARY,
+        )
+        # Yield immediately so the "Rendering…" label paints before we start.
+        self.after(0, self._populate_chunk, tracks, 0, self._populate_gen)
+
+    def _populate_chunk(self, tracks: list[Track], offset: int, gen: int) -> None:
+        """Create _RENDER_BATCH rows then yield via after(0) to keep the UI live."""
+        if gen != self._populate_gen:
+            return  # a newer load has started; discard this render pass
+        end = min(offset + _RENDER_BATCH, len(tracks))
+        for t in tracks[offset:end]:
             row = TrackRow(self._scroll, t, on_toggle=self._on_toggle)
             row.pre_downloaded = t.status == DownloadStatus.COMPLETE
             self._bind_mousewheel(row)
             self._rows[t.id] = row
-        self._load_btn.configure(state="normal", text="Reload")
-        self._refresh_visibility()
+        if end < len(tracks):
+            self._status_lbl.configure(
+                text=f"Loading… {end}/{len(tracks)}", text_color=TEXT_SECONDARY,
+            )
+            self.after(0, self._populate_chunk, tracks, end, gen)
+        else:
+            self._load_btn.configure(state="normal", text="Reload")
+            self._refresh_visibility()
 
     def _clear(self) -> None:
         for w in self._scroll.winfo_children():
