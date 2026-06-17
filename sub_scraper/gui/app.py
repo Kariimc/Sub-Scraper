@@ -19,7 +19,7 @@ from ..scrapers.base import DownloadStatus, Track
 from ..scrapers.soundcloud import SoundCloudScraper
 from ..scrapers.spotify import SpotifyScraper
 from .styles import (
-    BORDER, DARK_BG, ERROR, FONT_BRAND, FONT_MEDIUM, FONT_MONO,
+    BLUE, BLUE_HOVER, BORDER, DARK_BG, ERROR, FONT_BRAND, FONT_MEDIUM, FONT_MONO,
     FONT_SECTION, FONT_SMALL, FONT_TITLE, HIGHLIGHT, HIGHLIGHT_HOVER, INFO,
     NAVY_LIGHT, ORANGE, PANEL_BG, SIDEBAR_BG, SUCCESS, TEXT_ON_NAVY,
     TEXT_ON_NAVY_MUTED, TEXT_PRIMARY, TEXT_SECONDARY, WHITE,
@@ -206,11 +206,42 @@ class LibraryPanel(ctk.CTkFrame):
         self._load_btn = ctk.CTkButton(top, text="Load Library", width=130, command=self._load_library)
         self._load_btn.pack(side="right")
 
-        self._search_var = tk.StringVar()
-        self._search_var.trace_add("write", self._refresh_visibility)
-        ctk.CTkEntry(top, textvariable=self._search_var, placeholder_text="Search...", width=200).pack(
-            side="right", padx=8
+        # --- Search bar: magnifier icon + field + Enter button, grouped inside
+        #     one rounded "pill" so it clearly reads as a search control. -----
+        search_box = ctk.CTkFrame(
+            top, fg_color=PANEL_BG, corner_radius=18,
+            border_width=1, border_color=BORDER,
         )
+        search_box.pack(side="right", padx=(8, 10))
+
+        search_icon = ctk.CTkLabel(
+            search_box, text="🔍", font=FONT_MEDIUM, text_color=TEXT_SECONDARY, width=20,
+        )
+        search_icon.pack(side="left", padx=(10, 0))
+
+        self._search_var = tk.StringVar()
+        # Filtering is live (as you type); the Enter key/button below also
+        # applies it and jumps to the first match.
+        self._search_var.trace_add("write", self._refresh_visibility)
+        self._search_entry = ctk.CTkEntry(
+            search_box, textvariable=self._search_var,
+            placeholder_text="Search songs or playlists…",
+            placeholder_text_color=TEXT_SECONDARY,
+            width=200, border_width=0, fg_color=PANEL_BG, font=FONT_MEDIUM,
+        )
+        self._search_entry.pack(side="left", padx=(4, 2), pady=4)
+        self._search_entry.bind("<Return>", self._on_search_submit)
+
+        self._search_btn = ctk.CTkButton(
+            search_box, text="Enter", width=58, height=28, corner_radius=14,
+            fg_color=BLUE, hover_color=BLUE_HOVER, text_color=WHITE, font=FONT_SMALL,
+            command=self._on_search_submit,
+        )
+        self._search_btn.pack(side="left", padx=(2, 5), pady=4)
+
+        # Clicking anywhere on the pill (icon or padding) focuses the field.
+        for _w in (search_box, search_icon):
+            _w.bind("<Button-1>", lambda _e: self._search_entry.focus_set())
 
         self._status_lbl = ctk.CTkLabel(top, text="", font=FONT_SMALL, text_color=TEXT_SECONDARY)
         self._status_lbl.pack(side="left", padx=16)
@@ -649,6 +680,14 @@ class LibraryPanel(ctk.CTkFrame):
         for row in self._rows.values():
             row.set_selected(False)
         self._selected.clear()
+
+    def _on_search_submit(self, *_) -> None:
+        """Enter key / Enter button: apply the filter and scroll to the first
+        match. (Filtering is already live, so this is an explicit affordance.)"""
+        self._refresh_visibility()
+        canvas = self._scroll_canvas()
+        if canvas is not None:
+            canvas.yview_moveto(0.0)
 
     def _refresh_visibility(self, *_) -> None:
         """Single ordered pass: pack visible rows (in track order) and forget the
