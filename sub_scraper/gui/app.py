@@ -12,6 +12,7 @@ from ..core.config import Config
 from ..core.download_manager import DownloadJob, DownloadManager
 from ..core.library_index import DownloadIndex
 from ..core.logging_config import configure_logging
+from .artwork import ArtworkLoader, make_placeholder
 from .logo import get_ctk_image, set_window_icon
 from .wizard import SetupWizard
 from ..scrapers.base import DownloadStatus, Track
@@ -28,6 +29,7 @@ ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 
 _RENDER_BATCH = 50  # rows created per after(0) tick during library load
+_ART_SIZE = 46      # on-screen track-artwork thumbnail (px)
 
 
 def _norm(text: str) -> str:
@@ -54,13 +56,18 @@ _STATUS_ICON = {
 # ---------------------------------------------------------------------------
 
 class TrackRow(ctk.CTkFrame):
-    def __init__(self, master: ctk.CTkScrollableFrame, track: Track, on_toggle: callable) -> None:
+    def __init__(
+        self, master: ctk.CTkScrollableFrame, track: Track, on_toggle: callable,
+        placeholder=None,
+    ) -> None:
         super().__init__(master, fg_color=PANEL_BG, corner_radius=8,
                          border_width=1, border_color=BORDER)
         self.track = track
         # True when this track was already on disk at load time — used to hide
         # it under the "show downloaded" toggle without affecting live results.
         self.pre_downloaded = False
+        # True once real cover art has replaced the placeholder.
+        self.has_artwork = False
         self.selected = tk.BooleanVar(value=False)
         self._on_toggle = on_toggle
 
@@ -73,6 +80,16 @@ class TrackRow(ctk.CTkFrame):
         # command: this fires for clicks, Select All and Deselect All alike,
         # and reliably reports both select AND deselect.
         self.selected.trace_add("write", self._notify_toggle)
+
+        # Artwork thumbnail (starts as a shared placeholder; replaced async).
+        self._art_img = placeholder
+        if placeholder is not None:
+            self._art_lbl = ctk.CTkLabel(
+                self, image=placeholder, text="", width=_ART_SIZE, height=_ART_SIZE,
+            )
+            self._art_lbl.pack(side="left", padx=(2, 8))
+        else:
+            self._art_lbl = None
 
         info = ctk.CTkFrame(self, fg_color="transparent")
         info.pack(side="left", fill="x", expand=True, pady=6)
@@ -103,6 +120,12 @@ class TrackRow(ctk.CTkFrame):
 
     def set_selected(self, value: bool) -> None:
         self.selected.set(value)
+
+    def set_artwork(self, ctk_image) -> None:
+        if self._art_lbl is not None:
+            self._art_lbl.configure(image=ctk_image)
+            self._art_img = ctk_image  # keep a reference so Tk won't GC it
+            self.has_artwork = True
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +159,18 @@ class LibraryPanel(ctk.CTkFrame):
         self._playlists: list[dict] = []
         self._scraper = None
         self._populate_gen = 0  # incremented per load; cancels stale chunk renders
+
+        # Artwork: an off-thread loader, a shared placeholder, an in-memory
+        # CTkImage cache (keyed by URL so shared album art is built once) and a
+        # url -> [track id] waiter map applied when an image arrives.
+        self._art_loader = ArtworkLoader(store_size=_ART_SIZE * 2)
+        _ph = make_placeholder(_ART_SIZE * 2)
+        self._art_placeholder = (
+            ctk.CTkImage(light_image=_ph, dark_image=_ph, size=(_ART_SIZE, _ART_SIZE))
+            if _ph is not None else None
+        )
+        self._art_cache: dict[str, object] = {}
+        self._art_waiters: dict[str, list[str]] = {}
 
         self._build_header()
         self._build_list()
@@ -337,6 +372,8 @@ class LibraryPanel(ctk.CTkFrame):
                     self._populate(event[1])
                 elif kind == "playlists":
                     self._on_playlists_loaded(event[1], event[2])
+                elif kind == "artwork":
+                    self._apply_artwork(event[1], event[2])
                 elif kind == "fetch_error":
                     self._on_fetch_error(event[1])
         except queue.Empty:
@@ -564,7 +601,10 @@ class LibraryPanel(ctk.CTkFrame):
             return  # a newer load has started; discard this render pass
         end = min(offset + _RENDER_BATCH, len(tracks))
         for t in tracks[offset:end]:
-            row = TrackRow(self._scroll, t, on_toggle=self._on_toggle)
+            row = TrackRow(
+                self._scroll, t, on_toggle=self._on_toggle,
+                placeholder=self._art_placeholder,
+            )
             row.pre_downloaded = t.status == DownloadStatus.COMPLETE
             self._bind_mousewheel(row)
             self._rows[t.id] = row
@@ -583,6 +623,9 @@ class LibraryPanel(ctk.CTkFrame):
         self._rows.clear()
         self._selected.clear()
         self._tracks = []
+        # Drop pending artwork waiters for the rows we just destroyed (the URL
+        # cache is kept — it's reusable and bounded by unique cover art).
+        self._art_waiters.clear()
 
     # ------------------------------------------------------------------
     # Selection / visibility
@@ -623,6 +666,9 @@ class LibraryPanel(ctk.CTkFrame):
             match = not q or q in t.title.lower() or q in t.artist.lower()
             if match:
                 row.pack(fill="x", pady=2)
+                # Lazy-load artwork only for rows the user can actually see, so
+                # a hidden/filtered 1000-track library never fetches 1000 images.
+                self._request_artwork(row)
             else:
                 row.pack_forget()
 
@@ -631,6 +677,41 @@ class LibraryPanel(ctk.CTkFrame):
         if hidden_dl:
             msg += f"  ·  {hidden_dl} downloaded (hidden)"
         self._status_lbl.configure(text=msg, text_color=TEXT_SECONDARY)
+
+    # ------------------------------------------------------------------
+    # Artwork (lazy, off-thread, cached)
+    # ------------------------------------------------------------------
+
+    def _request_artwork(self, row: "TrackRow") -> None:
+        """Ensure ``row`` shows its cover art: apply from cache instantly, else
+        queue an off-thread fetch and register the row as a waiter."""
+        if row.has_artwork or self._art_placeholder is None:
+            return
+        url = row.track.cover_url
+        if not url:
+            return
+        cached = self._art_cache.get(url)
+        if cached is not None:
+            row.set_artwork(cached)
+            return
+        waiters = self._art_waiters.setdefault(url, [])
+        if row.track.id not in waiters:
+            waiters.append(row.track.id)
+        self._art_loader.request(url, self._on_artwork_ready)
+
+    def _on_artwork_ready(self, url: str, pil_image) -> None:
+        # Worker thread: only touch the thread-safe queue.
+        self._events.put(("artwork", url, pil_image))
+
+    def _apply_artwork(self, url: str, pil_image) -> None:
+        # Main thread: build the CTkImage once, cache it, hand to every waiter.
+        img = ctk.CTkImage(light_image=pil_image, dark_image=pil_image,
+                           size=(_ART_SIZE, _ART_SIZE))
+        self._art_cache[url] = img
+        for tid in self._art_waiters.pop(url, []):
+            row = self._rows.get(tid)
+            if row is not None:
+                row.set_artwork(img)
 
     # ------------------------------------------------------------------
     # Downloads
@@ -685,6 +766,10 @@ class LibraryPanel(ctk.CTkFrame):
         # Called from worker threads — only touch the thread-safe queue.
         # Snapshot the status now; the track object keeps mutating.
         self._events.put(("progress", track, track.status))
+
+    def shutdown(self) -> None:
+        """Release the artwork thread pool (called on app close)."""
+        self._art_loader.close()
 
 
 # ---------------------------------------------------------------------------
@@ -902,4 +987,7 @@ class App(ctk.CTk):
 
     def _on_close(self) -> None:
         self._manager.stop()
+        lib = self._panels.get("Library")
+        if lib is not None:
+            lib.shutdown()
         self.destroy()

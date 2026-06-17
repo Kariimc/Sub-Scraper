@@ -376,6 +376,84 @@ def _t_logo():
 
 
 # ---------------------------------------------------------------------------
+# Artwork loader (off-thread fetch + decode + disk cache, against local server)
+# ---------------------------------------------------------------------------
+
+@check("artwork: fetches off-thread, decodes square+rounded, caches to disk")
+def _t_artwork():
+    import http.server
+    import io
+    import socketserver
+    import threading
+    from PIL import Image
+    import sub_scraper.gui.artwork as art
+    from sub_scraper.scrapers.spotify import _thumb_url
+
+    # Placeholder is a real, non-blank square RGBA image.
+    ph = art.make_placeholder(92)
+    assert ph is not None and ph.size == (92, 92) and ph.mode == "RGBA"
+    assert len(ph.getcolors(maxcolors=100000)) > 5, "placeholder looks blank"
+
+    # Spotify picks the smallest cover >= 64px.
+    assert _thumb_url([{"url": "a", "width": 640}, {"url": "b", "width": 64}]) == "b"
+    assert _thumb_url([]) == ""
+
+    # Serve a real JPEG over localhost and load it end-to-end.
+    buf = io.BytesIO()
+    Image.new("RGB", (500, 300), (200, 90, 30)).save(buf, "JPEG")
+    payload = buf.getvalue()
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *a):
+            pass
+
+    srv = socketserver.TCPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/cover.jpg"
+
+    with tempfile.TemporaryDirectory() as d:
+        art._CACHE_DIR = Path(d)
+        done = threading.Event()
+        got: dict = {}
+
+        def on_ready(u, img):
+            got["url"], got["img"] = u, img
+            done.set()
+
+        loader = art.ArtworkLoader(store_size=92, workers=2)
+        try:
+            loader.request("", on_ready)          # empty url is a no-op
+            loader.request(url, on_ready)
+            assert done.wait(10), "loader never called back"
+            img = got["img"]
+            assert got["url"] == url
+            assert img.size == (92, 92) and img.mode == "RGBA"
+            # Centre-cropped + rounded: transparent corner, opaque centre.
+            assert img.getpixel((0, 0))[3] == 0, "corner not transparent"
+            assert img.getpixel((46, 46))[3] == 255, "centre not opaque"
+            assert len(list(Path(d).glob("*.png"))) == 1, "disk cache not written"
+        finally:
+            loader.close()
+            srv.shutdown()
+
+        # A fresh loader serves the same URL from the disk cache (no network).
+        loader2 = art.ArtworkLoader(store_size=92, workers=2)
+        done2 = threading.Event()
+        try:
+            loader2.request(url, lambda u, i: done2.set())
+            assert done2.wait(10), "disk-cache reload failed"
+        finally:
+            loader2.close()
+
+
+# ---------------------------------------------------------------------------
 # Config round-trip
 # ---------------------------------------------------------------------------
 
@@ -397,6 +475,7 @@ def main() -> int:
     _t_index(); _t_index_fs()
     _t_backoff(); _t_circuit()
     _t_net()
+    _t_artwork()
     _t_config()
     _t_logo()
 

@@ -10,6 +10,22 @@ _SCOPE = "user-library-read playlist-read-private"
 _CACHE = str(Path.home() / ".sub_scraper" / ".spotify_cache")
 
 
+def _thumb_url(images: list[dict]) -> str:
+    """Pick the smallest cover image >= 64px (Spotify returns them largest-first).
+
+    The library view only needs a ~46px thumbnail, so grabbing the 640x640 art
+    would waste bandwidth and memory across a big library; the smallest variant
+    is plenty."""
+    if not images:
+        return ""
+    sized = [im for im in images if im.get("url") and im.get("width")]
+    if not sized:
+        return images[0].get("url", "")
+    big_enough = [im for im in sized if im["width"] >= 64]
+    pick = min(big_enough or sized, key=lambda im: im["width"])
+    return pick.get("url", "")
+
+
 class SpotifyScraper(BaseScraper):
     log_prefix = "[spotDL]"
 
@@ -74,7 +90,6 @@ class SpotifyScraper(BaseScraper):
 
     def _parse(self, t: dict) -> Track:
         artists = ", ".join(a["name"] for a in t.get("artists", []))
-        images = t.get("album", {}).get("images") or []
         return Track(
             id=t["id"],
             title=t["name"],
@@ -82,7 +97,7 @@ class SpotifyScraper(BaseScraper):
             album=t.get("album", {}).get("name", ""),
             duration_ms=t.get("duration_ms", 0),
             url=t.get("external_urls", {}).get("spotify", ""),
-            cover_url=images[0].get("url", "") if images else "",
+            cover_url=_thumb_url(t.get("album", {}).get("images") or []),
         )
 
     def download_command(

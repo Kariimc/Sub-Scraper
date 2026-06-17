@@ -17,6 +17,8 @@
   circuit breakers, and post-download size + checksum verification.
 - 🙈 **Hides what you've already got** — downloaded tracks drop out of the list
   by default (toggle "Show downloaded" to reveal them).
+- 🖼️ **Track artwork** — cover art loads lazily off the UI thread (memory + disk
+  cached, keyed by URL) so even a 1000-track library stays smooth.
 - ☁️ **Optional Google Drive sync** — see [`GDRIVE_SETUP.md`](GDRIVE_SETUP.md).
 - 🎨 **Professional blue / orange / white UI** with a custom brand mark.
 
