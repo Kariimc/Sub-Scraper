@@ -247,6 +247,9 @@ class DownloadManager:
         track = job.track
         track.status = DownloadStatus.DOWNLOADING
         track.error = None
+        track.progress = 0.0
+        track.speed = ""
+        track.eta = ""
         if job.on_progress:
             job.on_progress(track)
 
@@ -256,6 +259,7 @@ class DownloadManager:
                 path = await self._download_with_retry(job)
             track.local_path = path
             track.status = DownloadStatus.COMPLETE
+            track.progress = 1.0
             log.info("download.complete " + kv(
                 track=track.id, source=job.source,
                 size=track.size_bytes, sha256=(track.checksum or "")[:12],
@@ -338,9 +342,17 @@ class DownloadManager:
         if scraper is None:
             raise RuntimeError(f"{job.source} scraper not configured")
         build_cmd = scraper.download_command(track, job.output_dir, job.quality, job.fmt)
+
+        def _on_progress(fraction: float, speed: str, eta: str) -> None:
+            track.progress = fraction
+            track.speed = speed
+            track.eta = eta
+            if job.on_progress:
+                job.on_progress(track)
+
         return await run_isolated_download_async(
             build_cmd, job.output_dir, track, scraper.log_prefix, job.on_log,
-            verify=self._verify,
+            verify=self._verify, on_progress=_on_progress,
         )
 
     # ------------------------------------------------------------------

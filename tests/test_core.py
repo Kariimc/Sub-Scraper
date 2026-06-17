@@ -462,10 +462,167 @@ def _t_config():
     c = Config()
     for field in ("max_concurrent", "retry_limit", "breaker_threshold",
                   "breaker_cooldown", "io_chunk_bytes", "hide_downloaded",
-                  "verify_downloads", "request_timeout"):
+                  "verify_downloads", "request_timeout",
+                  "auto_update_ytdlp", "autosync", "autosync_interval_hours"):
         assert hasattr(c, field), field
     assert c.hide_downloaded is True
     assert 64 * 1024 <= c.io_chunk_bytes <= 256 * 1024
+    assert c.auto_update_ytdlp is True
+    assert c.autosync == {} and c.autosync_interval_hours == 6.0
+    # Two instances must not share the same mutable autosync dict.
+    assert Config().autosync is not Config().autosync
+
+
+# ---------------------------------------------------------------------------
+# Progress parsing (pure + end-to-end through the engine)
+# ---------------------------------------------------------------------------
+
+@check("progress: parses yt-dlp/spotdl lines and ignores unrelated text")
+def _t_progress_parse():
+    from sub_scraper.core.progress import parse_progress
+
+    i = parse_progress("[download]  45.2% of 5.00MiB at 1.20MiB/s ETA 00:03")
+    assert i is not None and abs(i.fraction - 0.452) < 1e-6, i
+    assert i.speed == "1.20MiB/s" and i.eta == "00:03", i
+    assert parse_progress("[download] 100% of 5.00MiB in 00:04").fraction == 1.0
+    # A speed token alone (no [download]) still counts as progress.
+    assert parse_progress('Downloading: 78% at 900KiB/s') is not None
+    # A bare percentage in unrelated text is NOT progress.
+    assert parse_progress("Found 100% match for track") is None
+    assert parse_progress("just a log line") is None
+    assert parse_progress("") is None
+
+
+@check("progress: engine forwards live progress from downloader stdout")
+def _t_engine_progress():
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "music")
+        script = (
+            'echo "[download]   0.0% of 1.00MiB at 100KiB/s ETA 00:10"; '
+            'echo "[download]  50.0% of 1.00MiB at 200KiB/s ETA 00:05"; '
+            'echo "[download] 100% of 1.00MiB in 00:05"; '
+            'head -c 8192 /dev/zero > "{tmp}/song.{fmt}"'
+        )
+        mgr = DownloadManager(max_workers=1, retry_limit=1)
+        mgr.configure_spotify(FakeScraper(script))
+        mgr.start()
+        seen: list[float] = []
+        try:
+            t = make_track(77)
+            job = DownloadJob(t, "spotify", out, "320k", "mp3",
+                              on_progress=lambda tr: seen.append(tr.progress))
+            mgr.submit(job).result(timeout=30)
+        finally:
+            mgr.stop()
+        assert t.status == DownloadStatus.COMPLETE, t.error
+        assert any(abs(x - 0.5) < 1e-6 for x in seen), seen   # mid-download tick
+        assert t.progress == 1.0, t.progress                  # finalised
+
+
+# ---------------------------------------------------------------------------
+# Desktop integration (pure command builders)
+# ---------------------------------------------------------------------------
+
+@check("desktop: builds correct per-platform reveal/open/notify commands")
+def _t_desktop():
+    from sub_scraper.core import desktop as d
+
+    assert d.reveal_command("/m/x.mp3", "darwin") == ["open", "-R", "/m/x.mp3"]
+    assert d.reveal_command("/m/x.mp3", "linux") == ["xdg-open", "/m"]
+    assert d.reveal_command("C:/m/x.mp3", "win")[0] == "explorer"
+    assert "/select," in d.reveal_command("C:/m/x.mp3", "win")[1]
+    assert d.reveal_command("", "linux") is None
+
+    assert d.open_command("/m/x.mp3", "linux") == ["xdg-open", "/m/x.mp3"]
+    assert d.open_command("/m/x.mp3", "darwin") == ["open", "/m/x.mp3"]
+    assert d.open_command("/m/x.mp3", "win") is None  # uses os.startfile instead
+
+    assert d.notify_command("T", "M", "linux")[0] == "notify-send"
+    assert d.notify_command("T", "M", "win") is None
+    cmd = d.notify_command('Ti"tle', "msg", "darwin")
+    assert cmd[0] == "osascript" and '\\"' in cmd[2], cmd  # quotes escaped
+
+
+# ---------------------------------------------------------------------------
+# Updater (pure pip-output classifier)
+# ---------------------------------------------------------------------------
+
+@check("updater: classifies pip output as updated/current/failed")
+def _t_updater():
+    from sub_scraper.core.updater import classify_pip_output, CURRENT, FAILED, UPDATED
+
+    assert classify_pip_output(0, "Successfully installed yt-dlp-2024.1.1") == UPDATED
+    assert classify_pip_output(0, "Requirement already satisfied: yt-dlp") == CURRENT
+    assert classify_pip_output(1, "ERROR: could not install") == FAILED
+
+
+# ---------------------------------------------------------------------------
+# Download stats
+# ---------------------------------------------------------------------------
+
+@check("index: stats counts total, today, and bytes on disk")
+def _t_index_stats():
+    with tempfile.TemporaryDirectory() as dd:
+        d = Path(dd)
+        f1 = d / "a.mp3"; f1.write_bytes(b"x" * 2048)
+        f2 = d / "b.mp3"; f2.write_bytes(b"y" * 4096)
+        idx = DownloadIndex(d / "idx.json")
+        idx.record("spotify", Track(id="a", title="A", artist="X",
+                                    local_path=str(f1), size_bytes=2048))
+        idx.record("spotify", Track(id="b", title="B", artist="Y",
+                                    local_path=str(f2), size_bytes=4096))
+        s = idx.stats()
+        assert s["total"] == 2, s
+        assert s["today"] == 2, s            # just recorded -> counts as today
+        assert s["bytes"] == 2048 + 4096, s
+
+
+# ---------------------------------------------------------------------------
+# Auto-sync (filtering logic with an injected fake scraper/manager)
+# ---------------------------------------------------------------------------
+
+@check("autosync: queues only tracks not already on disk; membership reads config")
+def _t_autosync():
+    from sub_scraper.core.autosync import AutoSyncManager, SyncEntry
+
+    with tempfile.TemporaryDirectory() as dd:
+        d = Path(dd)
+        cfg = Config()
+        cfg.download_path = str(d / "music")
+        Path(cfg.download_path).mkdir(parents=True)
+        idx = DownloadIndex(d / "idx.json")
+
+        # t0 is already downloaded (recorded with an existing file).
+        existing = Path(cfg.download_path) / "x.mp3"
+        existing.write_bytes(b"z" * 2048)
+        idx.record("spotify", Track(id="t0", title="T0", artist="A",
+                                    local_path=str(existing), size_bytes=2048))
+
+        submitted: list = []
+
+        class FakeMgr:
+            def configure_spotify(self, s): pass
+            def configure_soundcloud(self, s): pass
+            def submit_batch(self, jobs, chunk_size=0): submitted.extend(jobs)
+
+        class FakeScraper2:
+            def fetch_playlist_tracks(self, pid):
+                return [make_track(0), make_track(1), make_track(2)]  # t0,t1,t2
+
+        mgr = AutoSyncManager(cfg, FakeMgr(), idx,
+                              scraper_factory=lambda c, s: FakeScraper2())
+        n = mgr.sync_now(SyncEntry("spotify", "pl1", "My PL"))
+        assert n == 2, n
+        assert {j.track.id for j in submitted} == {"t1", "t2"}, submitted
+
+        # Membership is read straight from config (no disk write needed here).
+        cfg.autosync = {"spotify:plY": {"source": "spotify",
+                                        "playlist_id": "plY", "name": "Y"}}
+        mgr2 = AutoSyncManager(cfg, FakeMgr(), idx,
+                               scraper_factory=lambda c, s: FakeScraper2())
+        assert mgr2.is_synced("spotify", "plY")
+        assert [e.name for e in mgr2.entries()] == ["Y"]
+        assert mgr2.interval_seconds() == 6.0 * 3600
 
 
 def main() -> int:
@@ -476,6 +633,9 @@ def main() -> int:
     _t_backoff(); _t_circuit()
     _t_net()
     _t_artwork()
+    _t_progress_parse(); _t_engine_progress()
+    _t_desktop(); _t_updater()
+    _t_index_stats(); _t_autosync()
     _t_config()
     _t_logo()
 

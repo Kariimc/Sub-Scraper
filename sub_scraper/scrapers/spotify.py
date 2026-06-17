@@ -98,6 +98,7 @@ class SpotifyScraper(BaseScraper):
             duration_ms=t.get("duration_ms", 0),
             url=t.get("external_urls", {}).get("spotify", ""),
             cover_url=_thumb_url(t.get("album", {}).get("images") or []),
+            preview_url=t.get("preview_url") or "",
         )
 
     def download_command(

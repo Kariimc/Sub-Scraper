@@ -1,5 +1,5 @@
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 CONFIG_PATH = Path.home() / ".sub_scraper" / "config.json"
@@ -46,6 +46,16 @@ class Config:
 
     # --- Library view ----------------------------------------------------
     hide_downloaded: bool = True    # hide tracks already downloaded
+
+    # --- Maintenance -----------------------------------------------------
+    # Upgrade yt-dlp on launch (in the background) so extraction stays working.
+    auto_update_ytdlp: bool = True
+
+    # --- Auto-sync -------------------------------------------------------
+    # Playlists kept in sync, keyed by "<source>:<playlist_id>" -> metadata.
+    autosync: dict = field(default_factory=dict)
+    # How often the background scheduler re-checks synced playlists.
+    autosync_interval_hours: float = 6.0
 
     # --- Integrations ----------------------------------------------------
     use_gdrive: bool = False

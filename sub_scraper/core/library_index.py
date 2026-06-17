@@ -125,6 +125,28 @@ class DownloadIndex:
         with self._lock:
             return len(self._entries)
 
+    def stats(self) -> dict:
+        """Aggregate counters for the footer: total downloaded, how many today,
+        and total bytes on disk."""
+        import datetime
+
+        midnight = datetime.datetime.now().replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).timestamp()
+        with self._lock:
+            entries = list(self._entries.values())
+        total = len(entries)
+        total_bytes = 0
+        today = 0
+        for e in entries:
+            try:
+                total_bytes += int(e.get("size", 0) or 0)
+            except (TypeError, ValueError):
+                pass
+            if float(e.get("ts", 0) or 0) >= midnight:
+                today += 1
+        return {"total": total, "today": today, "bytes": total_bytes}
+
     # ------------------------------------------------------------------
     # Filesystem fallback (catches files grabbed before the index existed)
     # ------------------------------------------------------------------

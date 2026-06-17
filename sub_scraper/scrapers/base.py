@@ -11,6 +11,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Optional
 
+from ..core.progress import parse_progress
+
+#: Called with (fraction 0..1, speed, eta) as a download advances.
+ProgressCb = Callable[[float, str, str], None]
+
 # Final audio container extensions we expect a download to produce.
 _AUDIO_EXTS = {"mp3", "m4a", "ogg", "opus", "wav", "flac", "aac"}
 
@@ -29,6 +34,9 @@ def ytdlp_perf_flags(concurrent_fragments: int = 4, use_aria2c: bool = True) -> 
         "--retries", "10",
         "--fragment-retries", "10",
         "--file-access-retries", "5",
+        # Emit each progress update on its own line (instead of overwriting one
+        # line with \r) so the engine can parse per-track progress reliably.
+        "--newline",
     ]
     if use_aria2c and shutil.which("aria2c"):
         flags += ["--downloader", "aria2c",
@@ -39,7 +47,7 @@ def ytdlp_perf_flags(concurrent_fragments: int = 4, use_aria2c: bool = True) -> 
 def ytdlp_perf_args_str(concurrent_fragments: int = 4) -> str:
     """The throughput/resilience flags as one string, for tools that forward
     args to yt-dlp (e.g. spotdl's --yt-dlp-args)."""
-    return f"-N {max(1, concurrent_fragments)} --retries 10 --fragment-retries 10"
+    return f"-N {max(1, concurrent_fragments)} --retries 10 --fragment-retries 10 --newline"
 
 
 class DownloadStatus(Enum):
@@ -58,12 +66,18 @@ class Track:
     duration_ms: int = 0
     url: str = ""
     cover_url: str = ""
+    # A short (~30s) streamable preview clip, when the source exposes one.
+    preview_url: str = ""
     status: DownloadStatus = DownloadStatus.PENDING
     local_path: Optional[str] = None
     error: Optional[str] = None
     # Populated by post-download integrity verification.
     size_bytes: int = 0
     checksum: Optional[str] = None
+    # Live download progress (updated by the engine, read by the GUI).
+    progress: float = 0.0   # 0.0 .. 1.0
+    speed: str = ""         # e.g. "1.20MiB/s"
+    eta: str = ""           # e.g. "00:03"
 
     @property
     def display_name(self) -> str:
@@ -194,6 +208,7 @@ async def run_isolated_download_async(
     on_log: Optional[Callable[[str], None]],
     *,
     verify: bool = True,
+    on_progress: Optional[ProgressCb] = None,
 ) -> str:
     """Async twin of :func:`run_isolated_download`.
 
@@ -201,11 +216,16 @@ async def run_isolated_download_async(
     its stdout line-by-line without blocking the event loop, so a single loop
     thread can supervise many concurrent downloads. The subprocess is reaped via
     ``wait()`` and its temp directory is always cleaned up.
+
+    Progress lines are detected and routed to ``on_progress`` (throttled to once
+    per whole-percent change) instead of flooding the log; everything else is
+    forwarded to ``on_log``.
     """
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     tmpdir = Path(tempfile.mkdtemp(dir=out, prefix=".dl_"))
     proc: Optional[asyncio.subprocess.Process] = None
+    last_pct = -1
     try:
         cmd = [str(c) for c in build_cmd(tmpdir)]
         proc = await asyncio.create_subprocess_exec(
@@ -219,7 +239,17 @@ async def run_isolated_download_async(
             if not raw:
                 break
             stripped = raw.decode("utf-8", "replace").strip()
-            if stripped and on_log:
+            if not stripped:
+                continue
+            info = parse_progress(stripped)
+            if info is not None:
+                if on_progress is not None:
+                    pct = int(info.fraction * 100)
+                    if pct != last_pct:
+                        last_pct = pct
+                        on_progress(info.fraction, info.speed, info.eta)
+                continue  # keep progress chatter out of the log
+            if on_log:
                 on_log(f"{log_prefix} {stripped}")
         returncode = await proc.wait()
         proc = None

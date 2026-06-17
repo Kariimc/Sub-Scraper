@@ -8,22 +8,35 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
+from ..core import desktop
+from ..core.autosync import AutoSyncManager
 from ..core.config import Config
 from ..core.download_manager import DownloadJob, DownloadManager
 from ..core.library_index import DownloadIndex
 from ..core.logging_config import configure_logging
+from ..core.updater import UPDATED, update_ytdlp
 from .artwork import ArtworkLoader, make_placeholder
 from .logo import get_ctk_image, set_window_icon
+from .preview import PreviewPlayer
 from .wizard import SetupWizard
 from ..scrapers.base import DownloadStatus, Track
-from ..scrapers.soundcloud import SoundCloudScraper
-from ..scrapers.spotify import SpotifyScraper
+from ..scrapers.factory import SPOTIFY, build_scraper
 from .styles import (
     BLUE, BLUE_HOVER, BORDER, DARK_BG, ERROR, FONT_BRAND, FONT_MEDIUM, FONT_MONO,
     FONT_SECTION, FONT_SMALL, FONT_TITLE, HIGHLIGHT, HIGHLIGHT_HOVER, INFO,
     NAVY_LIGHT, ORANGE, PANEL_BG, SIDEBAR_BG, SUCCESS, TEXT_ON_NAVY,
     TEXT_ON_NAVY_MUTED, TEXT_PRIMARY, TEXT_SECONDARY, WHITE,
 )
+
+
+def _human_size(n: int) -> str:
+    """Compact human-readable byte size, e.g. 2.1 GB."""
+    size = float(max(0, n))
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
 
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
@@ -57,19 +70,19 @@ _STATUS_ICON = {
 
 class TrackRow(ctk.CTkFrame):
     def __init__(
-        self, master: ctk.CTkScrollableFrame, track: Track, on_toggle: callable,
+        self, master: ctk.CTkScrollableFrame, track: Track, panel: "LibraryPanel",
         placeholder=None,
     ) -> None:
         super().__init__(master, fg_color=PANEL_BG, corner_radius=8,
                          border_width=1, border_color=BORDER)
         self.track = track
+        self._panel = panel
         # True when this track was already on disk at load time — used to hide
         # it under the "show downloaded" toggle without affecting live results.
         self.pre_downloaded = False
         # True once real cover art has replaced the placeholder.
         self.has_artwork = False
         self.selected = tk.BooleanVar(value=False)
-        self._on_toggle = on_toggle
 
         self._checkbox = ctk.CTkCheckBox(
             self, variable=self.selected, text="", width=28,
@@ -93,9 +106,19 @@ class TrackRow(ctk.CTkFrame):
 
         info = ctk.CTkFrame(self, fg_color="transparent")
         info.pack(side="left", fill="x", expand=True, pady=6)
+        self._info = info
 
-        ctk.CTkLabel(info, text=track.title, anchor="w", font=FONT_MEDIUM, text_color=TEXT_PRIMARY).pack(fill="x")
-        ctk.CTkLabel(info, text=track.artist, anchor="w", font=FONT_SMALL, text_color=TEXT_SECONDARY).pack(fill="x")
+        self._title_lbl = ctk.CTkLabel(info, text=track.title, anchor="w", font=FONT_MEDIUM, text_color=TEXT_PRIMARY)
+        self._title_lbl.pack(fill="x")
+        self._artist_lbl = ctk.CTkLabel(info, text=track.artist, anchor="w", font=FONT_SMALL, text_color=TEXT_SECONDARY)
+        self._artist_lbl.pack(fill="x")
+
+        # Per-track download progress: a thin bar + a speed/ETA line, both shown
+        # only while this track is actively downloading.
+        self._progress = ctk.CTkProgressBar(info, height=5, corner_radius=3, progress_color=ORANGE)
+        self._progress.set(0)
+        self._dl_lbl = ctk.CTkLabel(info, text="", anchor="w", font=FONT_SMALL, text_color=INFO)
+        self._dl_shown = False  # whether the progress bar is currently packed
 
         dur_s = track.duration_ms // 1000
         dur_str = f"{dur_s // 60}:{dur_s % 60:02d}" if dur_s else "--:--"
@@ -109,17 +132,72 @@ class TrackRow(ctk.CTkFrame):
         )
         self._status_lbl.pack(side="right", padx=4)
 
+        # Preview play button (only when the source exposes a clip and a player
+        # is available on this machine).
+        if panel.preview_available and track.preview_url:
+            self._play_btn = ctk.CTkButton(
+                self, text="▶", width=34, height=28, corner_radius=14,
+                fg_color="transparent", hover_color=BORDER, text_color=BLUE,
+                font=FONT_MEDIUM, command=lambda: panel._toggle_preview(self),
+            )
+            self._play_btn.pack(side="right", padx=(0, 2))
+        else:
+            self._play_btn = None
+
+        # Click to (de)select, shift-click to select a range, right-click for the
+        # context menu — bound on the non-interactive parts of the row.
+        for w in (self, info, self._title_lbl, self._artist_lbl):
+            w.bind("<Button-1>", self._on_click)
+            w.bind("<Shift-Button-1>", self._on_shift_click)
+            w.bind("<Button-3>", self._on_context)
+            w.bind("<Button-2>", self._on_context)  # macOS secondary click
+        if self._art_lbl is not None:
+            self._art_lbl.bind("<Button-3>", self._on_context)
+            self._art_lbl.bind("<Button-2>", self._on_context)
+
     def _notify_toggle(self, *_) -> None:
-        self._on_toggle(self.track, self.selected.get())
+        self._panel._on_toggle(self.track, self.selected.get())
+
+    def _on_click(self, _e) -> str:
+        self._panel._on_row_click(self, shift=False)
+        return "break"
+
+    def _on_shift_click(self, _e) -> str:
+        self._panel._on_row_click(self, shift=True)
+        return "break"
+
+    def _on_context(self, event) -> str:
+        self._panel._show_context_menu(self, event)
+        return "break"
 
     def refresh_status(self) -> None:
-        self._status_lbl.configure(
-            text=_STATUS_ICON[self.track.status],
-            text_color=_STATUS_COLOR[self.track.status],
-        )
+        st = self.track.status
+        self._status_lbl.configure(text=_STATUS_ICON[st], text_color=_STATUS_COLOR[st])
+        downloading = st == DownloadStatus.DOWNLOADING
+        if downloading and not self._dl_shown:
+            self._progress.pack(fill="x", pady=(4, 0))
+            self._dl_lbl.pack(fill="x")
+            self._dl_shown = True
+        elif not downloading and self._dl_shown:
+            self._progress.pack_forget()
+            self._dl_lbl.pack_forget()
+            self._dl_shown = False
+
+    def set_progress(self, fraction: float, speed: str, eta: str) -> None:
+        self._progress.set(max(0.0, min(1.0, fraction)))
+        bits = []
+        if speed:
+            bits.append(speed)
+        if eta:
+            bits.append(f"ETA {eta}")
+        self._dl_lbl.configure(text="   ·   ".join(bits) or f"{int(fraction * 100)}%")
 
     def set_selected(self, value: bool) -> None:
         self.selected.set(value)
+
+    def set_preview_playing(self, playing: bool) -> None:
+        if self._play_btn is not None:
+            self._play_btn.configure(text="⏸" if playing else "▶")
 
     def set_artwork(self, ctk_image) -> None:
         if self._art_lbl is not None:
@@ -141,16 +219,24 @@ class LibraryPanel(ctk.CTkFrame):
         self._config = config
         self._manager = manager
         self._index = index
+        self._autosync: "AutoSyncManager | None" = None
         self._tracks: list[Track] = []
         self._rows: dict[str, TrackRow] = {}
         self._selected: set[str] = set()
+        self._anchor_id: str | None = None  # for shift-click range selection
         self._log_visible = False
 
         # Batch progress state (updated only on the main thread).
         self._dl_total = 0
         self._dl_done = 0
         self._dl_failed = 0
-        self._dl_active: dict[str, str] = {}  # track id -> display name
+        self._dl_active: dict[str, Track] = {}  # track id -> Track (live)
+        self._batch_notified = True  # suppress a notification before any batch
+
+        # 30-second preview playback (one stream at a time).
+        self._preview = PreviewPlayer(on_finished=self._on_preview_finished)
+        self.preview_available = self._preview.available()
+        self._preview_row: "TrackRow | None" = None
 
         # All worker-thread → GUI updates flow through this queue and are
         # drained on the main thread. tkinter is not thread-safe, so workers
@@ -177,8 +263,14 @@ class LibraryPanel(ctk.CTkFrame):
         self._build_log_panel()
         self._build_status_bar()
         self._build_footer()
+        self._build_toast()
 
         self.after(100, self._process_events)
+
+    def set_autosync(self, autosync: "AutoSyncManager") -> None:
+        """Wire the auto-sync scheduler in (created by App after this panel)."""
+        self._autosync = autosync
+        self._refresh_autosync_toggle()
 
     # ------------------------------------------------------------------
     # Layout builders
@@ -264,6 +356,16 @@ class LibraryPanel(ctk.CTkFrame):
         )
         # Not packed until playlists have been fetched
 
+        # Per-playlist auto-sync toggle (shown only in Playlists mode once a
+        # playlist is selected).
+        self._current_playlist: dict | None = None
+        self._autosync_var = tk.BooleanVar(value=False)
+        self._autosync_chk = ctk.CTkCheckBox(
+            content_row, text="🔄 Auto-sync", variable=self._autosync_var,
+            font=FONT_SMALL, text_color=TEXT_SECONDARY, command=self._on_autosync_toggle,
+        )
+        # Not packed until a playlist is selected.
+
         # Already-downloaded tracks are hidden by default to keep the list to
         # what's left to grab; this reveals them on demand.
         self._show_dl_var = tk.BooleanVar(value=not bool(self._config.hide_downloaded))
@@ -333,9 +435,17 @@ class LibraryPanel(ctk.CTkFrame):
         )
         self._status_bar_lbl.grid(row=0, column=0, sticky="ew", padx=10, pady=(6, 2))
 
+        # Library stats (right-aligned): total / today / bytes on disk.
+        self._stats_lbl = ctk.CTkLabel(
+            bar, text="", anchor="e", font=FONT_SMALL, text_color=TEXT_SECONDARY,
+        )
+        self._stats_lbl.grid(row=0, column=1, sticky="e", padx=10, pady=(6, 2))
+
         self._progress_bar = ctk.CTkProgressBar(bar, height=8, progress_color=ORANGE)
         self._progress_bar.set(0)
-        self._progress_bar.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 8))
+        self._progress_bar.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8))
+
+        self._update_stats()
 
     def _build_footer(self) -> None:
         bar = ctk.CTkFrame(self, fg_color="transparent")
@@ -359,6 +469,31 @@ class LibraryPanel(ctk.CTkFrame):
             fg_color=HIGHLIGHT, hover_color=HIGHLIGHT_HOVER, text_color=WHITE,
             command=self._download_selected,
         ).pack(side="right")
+
+    # ------------------------------------------------------------------
+    # Toast (transient in-app notification, overlaid at the top)
+    # ------------------------------------------------------------------
+
+    def _build_toast(self) -> None:
+        self._toast_frame = ctk.CTkFrame(self, fg_color=NAVY_LIGHT, corner_radius=18)
+        self._toast_lbl = ctk.CTkLabel(
+            self._toast_frame, text="", font=FONT_MEDIUM, text_color=WHITE,
+        )
+        self._toast_lbl.pack(padx=18, pady=8)
+        self._toast_after: str | None = None
+
+    def _toast(self, message: str, *, color: str = NAVY_LIGHT, duration: int = 4500) -> None:
+        self._toast_frame.configure(fg_color=color)
+        self._toast_lbl.configure(text=message)
+        self._toast_frame.place(relx=0.5, rely=0.02, anchor="n")
+        self._toast_frame.lift()
+        if self._toast_after is not None:
+            self.after_cancel(self._toast_after)
+        self._toast_after = self.after(duration, self._hide_toast)
+
+    def _hide_toast(self) -> None:
+        self._toast_frame.place_forget()
+        self._toast_after = None
 
     # ------------------------------------------------------------------
     # Log panel
@@ -407,6 +542,12 @@ class LibraryPanel(ctk.CTkFrame):
                     self._apply_artwork(event[1], event[2])
                 elif kind == "fetch_error":
                     self._on_fetch_error(event[1])
+                elif kind == "toast":
+                    self._toast(event[1], color=event[2])
+                elif kind == "preview_done":
+                    self._on_preview_done(event[1])
+                elif kind == "autosync":
+                    self._on_autosync_done(event[1], event[2])
         except queue.Empty:
             pass
         self.after(100, self._process_events)
@@ -420,6 +561,7 @@ class LibraryPanel(ctk.CTkFrame):
         self._dl_done = 0
         self._dl_failed = 0
         self._dl_active.clear()
+        self._batch_notified = False
         self._progress_bar.set(0)
         self._status_bar_lbl.configure(
             text=f"Starting {total} download{'s' if total != 1 else ''}…",
@@ -430,14 +572,18 @@ class LibraryPanel(ctk.CTkFrame):
         row = self._rows.get(track.id)
         if row is not None:
             row.refresh_status()
+            if status == DownloadStatus.DOWNLOADING:
+                row.set_progress(track.progress, track.speed, track.eta)
 
         if status == DownloadStatus.DOWNLOADING:
-            self._dl_active[track.id] = track.display_name
+            self._dl_active[track.id] = track
         elif status in (DownloadStatus.COMPLETE, DownloadStatus.FAILED):
             self._dl_active.pop(track.id, None)
             self._dl_done += 1
             if status == DownloadStatus.FAILED:
                 self._dl_failed += 1
+            else:
+                self._update_stats()
 
         self._refresh_status_bar()
 
@@ -456,11 +602,15 @@ class LibraryPanel(ctk.CTkFrame):
             self._status_bar_lbl.configure(
                 text=msg, text_color=ERROR if self._dl_failed else SUCCESS,
             )
+            self._announce_batch_done(ok, self._dl_failed)
             return
 
         active = list(self._dl_active.values())
         if active:
-            current = active[0]
+            lead = active[0]
+            current = lead.display_name
+            if lead.speed:
+                current += f"  ({lead.speed})"
             extra = f"   (+{len(active) - 1} more)" if len(active) > 1 else ""
         else:
             current = "preparing…"
@@ -468,6 +618,33 @@ class LibraryPanel(ctk.CTkFrame):
         self._status_bar_lbl.configure(
             text=f"↓  {self._dl_done}/{total}   •   {current}{extra}",
             text_color=INFO,
+        )
+
+    def _announce_batch_done(self, ok: int, failed: int) -> None:
+        """Fire the OS + in-app notification exactly once per batch."""
+        if self._batch_notified:
+            return
+        self._batch_notified = True
+        title = "Sub-Scraper — downloads finished"
+        msg = f"{ok} downloaded" + (f", {failed} failed" if failed else "")
+        desktop.notify(title, msg)
+        self._toast(
+            f"✓ {msg}",
+            color=ERROR if failed else SUCCESS,
+        )
+        self._update_stats()
+
+    # ------------------------------------------------------------------
+    # Library stats footer
+    # ------------------------------------------------------------------
+
+    def _update_stats(self) -> None:
+        try:
+            s = self._index.stats()
+        except Exception:  # noqa: BLE001 - stats are decorative
+            return
+        self._stats_lbl.configure(
+            text=f"🎵 {s['total']} in library   ·   {s['today']} today   ·   {_human_size(s['bytes'])}"
         )
 
     # ------------------------------------------------------------------
@@ -482,8 +659,10 @@ class LibraryPanel(ctk.CTkFrame):
         self._clear()
         self._playlists = []
         self._scraper = None
+        self._current_playlist = None
         self._status_lbl.configure(text="")
         self._playlist_menu.pack_forget()
+        self._autosync_chk.pack_forget()
         self._load_btn.configure(text="Load Library")
 
     def _load_library(self) -> None:
@@ -498,24 +677,11 @@ class LibraryPanel(ctk.CTkFrame):
 
     def _fetch(self) -> None:
         try:
-            source = self._source_var.get()
-            try:
-                frags = int(self._config.concurrent_fragments)
-            except (ValueError, TypeError):
-                frags = 4
-            if source == "Spotify":
-                scraper = SpotifyScraper(
-                    self._config.spotify_client_id,
-                    self._config.spotify_client_secret,
-                    concurrent_fragments=frags,
-                )
+            source = self._source_key()
+            scraper = build_scraper(self._config, source)
+            if source == SPOTIFY:
                 self._manager.configure_spotify(scraper)
             else:
-                scraper = SoundCloudScraper(
-                    auth_token=self._config.soundcloud_auth_token,
-                    username=self._config.soundcloud_username,
-                    concurrent_fragments=frags,
-                )
                 self._manager.configure_soundcloud(scraper)
 
             if self._content_var.get() == "Playlists":
@@ -535,8 +701,10 @@ class LibraryPanel(ctk.CTkFrame):
         self._clear()
         self._playlists = []
         self._scraper = None
+        self._current_playlist = None
         self._status_lbl.configure(text="")
         self._playlist_menu.pack_forget()
+        self._autosync_chk.pack_forget()
         self._load_btn.configure(text="Load Library")
 
     def _on_playlists_loaded(self, playlists: list[dict], scraper) -> None:
@@ -556,6 +724,8 @@ class LibraryPanel(ctk.CTkFrame):
         pl = next((p for p in self._playlists if p["name"] == name), None)
         if pl is None or self._scraper is None:
             return
+        self._current_playlist = pl
+        self._refresh_autosync_toggle()
         self._load_btn.configure(state="disabled", text="Loading…")
         self._status_lbl.configure(text=f"Fetching '{name}'…", text_color=TEXT_SECONDARY)
         pid = pl["id"]
@@ -633,7 +803,7 @@ class LibraryPanel(ctk.CTkFrame):
         end = min(offset + _RENDER_BATCH, len(tracks))
         for t in tracks[offset:end]:
             row = TrackRow(
-                self._scroll, t, on_toggle=self._on_toggle,
+                self._scroll, t, panel=self,
                 placeholder=self._art_placeholder,
             )
             row.pre_downloaded = t.status == DownloadStatus.COMPLETE
@@ -649,10 +819,14 @@ class LibraryPanel(ctk.CTkFrame):
             self._refresh_visibility()
 
     def _clear(self) -> None:
+        # Destroying rows mid-preview would orphan the play button; stop first.
+        self._preview.stop()
+        self._preview_row = None
         for w in self._scroll.winfo_children():
             w.destroy()
         self._rows.clear()
         self._selected.clear()
+        self._anchor_id = None
         self._tracks = []
         # Drop pending artwork waiters for the rows we just destroyed (the URL
         # cache is kept — it's reusable and bounded by unique cover art).
@@ -680,6 +854,24 @@ class LibraryPanel(ctk.CTkFrame):
         for row in self._rows.values():
             row.set_selected(False)
         self._selected.clear()
+        self._anchor_id = None
+
+    def _visible_rows(self) -> list["TrackRow"]:
+        """Currently-visible rows, in track order (the dict preserves it)."""
+        return [r for r in self._rows.values() if r.winfo_ismapped()]
+
+    def _on_row_click(self, row: "TrackRow", *, shift: bool) -> None:
+        """Click a row to toggle it; shift-click to select the range from the
+        last clicked row (the anchor) to this one."""
+        visible = self._visible_rows()
+        ids = [r.track.id for r in visible]
+        if shift and self._anchor_id in ids and row.track.id in ids:
+            i, j = sorted((ids.index(self._anchor_id), ids.index(row.track.id)))
+            for r in visible[i:j + 1]:
+                r.set_selected(True)
+        else:
+            row.set_selected(not row.selected.get())
+            self._anchor_id = row.track.id
 
     def _on_search_submit(self, *_) -> None:
         """Enter key / Enter button: apply the filter and scroll to the first
@@ -753,6 +945,98 @@ class LibraryPanel(ctk.CTkFrame):
                 row.set_artwork(img)
 
     # ------------------------------------------------------------------
+    # Preview playback (30-second clips)
+    # ------------------------------------------------------------------
+
+    def _toggle_preview(self, row: "TrackRow") -> None:
+        now_playing = self._preview.toggle(row.track.preview_url)
+        if self._preview_row is not None and self._preview_row is not row:
+            self._preview_row.set_preview_playing(False)
+        row.set_preview_playing(now_playing)
+        self._preview_row = row if now_playing else None
+
+    def _on_preview_finished(self, url: str) -> None:
+        # PreviewPlayer watcher thread — marshal onto the main thread.
+        self._events.put(("preview_done", url))
+
+    def _on_preview_done(self, url: str) -> None:
+        row = self._preview_row
+        if row is not None and row.track.preview_url == url:
+            row.set_preview_playing(False)
+            self._preview_row = None
+
+    # ------------------------------------------------------------------
+    # Context menu (right-click a row)
+    # ------------------------------------------------------------------
+
+    def _show_context_menu(self, row: "TrackRow", event) -> None:
+        track = row.track
+        path = track.local_path
+        downloaded = bool(path and Path(path).exists())
+        menu = tk.Menu(self, tearoff=0)
+        if downloaded:
+            menu.add_command(label="Reveal in folder",
+                             command=lambda: desktop.reveal_in_folder(path))
+            menu.add_command(label="Play file",
+                             command=lambda: desktop.open_path(path))
+        else:
+            menu.add_command(label="Download this track",
+                             command=lambda: self._start_download([track]))
+        if track.preview_url and self.preview_available:
+            menu.add_command(label="Play preview",
+                             command=lambda: self._toggle_preview(row))
+        menu.add_separator()
+        menu.add_command(label='Copy "Artist - Title"',
+                         command=lambda: self._copy_to_clipboard(track.display_name))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _copy_to_clipboard(self, text: str) -> None:
+        self.clipboard_clear()
+        self.clipboard_append(text)
+
+    # ------------------------------------------------------------------
+    # Auto-sync (per-playlist)
+    # ------------------------------------------------------------------
+
+    def _refresh_autosync_toggle(self) -> None:
+        pl = self._current_playlist
+        if pl is None or self._autosync is None or self._content_var.get() != "Playlists":
+            self._autosync_chk.pack_forget()
+            return
+        # Reflect current membership (set() does NOT fire the command callback).
+        self._autosync_var.set(self._autosync.is_synced(self._source_key(), pl["id"]))
+        if not self._autosync_chk.winfo_ismapped():
+            self._autosync_chk.pack(side="left", padx=(12, 0))
+
+    def _on_autosync_toggle(self) -> None:
+        pl = self._current_playlist
+        if pl is None or self._autosync is None:
+            return
+        source = self._source_key()
+        if self._autosync_var.get():
+            self._autosync.add(source, pl["id"], pl["name"])
+            self._toast(f"🔄 Auto-syncing \"{pl['name']}\"")
+        else:
+            self._autosync.remove(source, pl["id"])
+            self._toast(f"Stopped auto-syncing \"{pl['name']}\"")
+
+    def _autosync_event(self, entry, count: int) -> None:
+        # autosync thread — marshal onto the main thread.
+        self._events.put(("autosync", entry.name, count))
+
+    def _on_autosync_done(self, name: str, count: int) -> None:
+        if count > 0:
+            self._toast(f"🔄 Auto-sync: {count} new from \"{name}\"", color=INFO)
+            self._update_stats()
+
+    def _post_toast(self, message: str, color: str = NAVY_LIGHT) -> None:
+        """Thread-safe: queue a toast from any thread (used by the updater)."""
+        self._events.put(("toast", message, color))
+
+    # ------------------------------------------------------------------
     # Downloads
     # ------------------------------------------------------------------
 
@@ -807,8 +1091,9 @@ class LibraryPanel(ctk.CTkFrame):
         self._events.put(("progress", track, track.status))
 
     def shutdown(self) -> None:
-        """Release the artwork thread pool (called on app close)."""
+        """Release the artwork pool + preview player (called on app close)."""
         self._art_loader.close()
+        self._preview.close()
 
 
 # ---------------------------------------------------------------------------
@@ -887,6 +1172,24 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         ).pack(side="left")
         ctk.CTkButton(clear_row, text="Clear History", width=120, command=self._clear_history).pack(side="left")
 
+        self._section("Maintenance")
+        self._checkbox("Auto-update yt-dlp on launch (recommended)", "auto_update_ytdlp")
+
+        self._section("Auto-sync")
+        self._field("Check Interval (hours)", "autosync_interval_hours")
+        sync_row = ctk.CTkFrame(self, fg_color="transparent")
+        sync_row.pack(fill="x", padx=16, pady=3)
+        self._autosync_lbl = ctk.CTkLabel(
+            sync_row, text=self._autosync_summary(), width=210, anchor="w",
+            font=FONT_SMALL, text_color=TEXT_SECONDARY,
+        )
+        self._autosync_lbl.pack(side="left")
+        ctk.CTkButton(sync_row, text="Stop All", width=120, command=self._stop_all_autosync).pack(side="left")
+        ctk.CTkLabel(
+            self, text="Toggle auto-sync per playlist from the Library tab.",
+            anchor="w", font=FONT_SMALL, text_color=TEXT_SECONDARY,
+        ).pack(fill="x", padx=16)
+
         self._section("Performance & Resilience")
         self._field("Max Concurrent Downloads", "max_concurrent")
         self._field("Parallel Fragments / Track", "concurrent_fragments")
@@ -910,6 +1213,19 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         count = self._index.clear()
         messagebox.showinfo("Sub-Scraper", f"Cleared {count} item(s) from download history.")
 
+    def _autosync_summary(self) -> str:
+        store = getattr(self._config, "autosync", None)
+        n = len(store) if isinstance(store, dict) else 0
+        return f"{n} playlist{'s' if n != 1 else ''} syncing"
+
+    def _stop_all_autosync(self) -> None:
+        store = getattr(self._config, "autosync", None)
+        if isinstance(store, dict) and store:
+            store.clear()
+            self._config.save()
+        self._autosync_lbl.configure(text=self._autosync_summary())
+        messagebox.showinfo("Sub-Scraper", "Auto-sync disabled for all playlists.")
+
     def _save(self) -> None:
         int_fields = (
             ("max_concurrent", 6), ("chunk_size", 50), ("concurrent_fragments", 4),
@@ -918,6 +1234,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         float_fields = (
             ("breaker_cooldown", 30.0), ("request_timeout", 30.0),
             ("retry_base_delay", 1.0), ("retry_max_delay", 30.0),
+            ("autosync_interval_hours", 6.0),
         )
         for attr, default in int_fields:
             try:
@@ -957,6 +1274,7 @@ class App(ctk.CTk):
         self._manager = DownloadManager.from_config(self._config)
         self._manager.configure_index(self._index)
         self._manager.start()
+        self._autosync: "AutoSyncManager | None" = None
 
         self._panels: dict[str, ctk.CTkFrame] = {}
         self._nav_btns: dict[str, ctk.CTkButton] = {}
@@ -990,7 +1308,7 @@ class App(ctk.CTk):
             self._nav_btns[name] = btn
 
         ctk.CTkLabel(
-            sidebar, text="v2.0  ·  async engine", font=FONT_SMALL,
+            sidebar, text="v2.1  ·  async engine", font=FONT_SMALL,
             text_color=TEXT_ON_NAVY_MUTED,
         ).pack(side="bottom", pady=16)
 
@@ -1002,13 +1320,30 @@ class App(ctk.CTk):
 
         # Now that the Library panel (and its thread-safe log sink) exists, route
         # structured INFO logs into the in-app Download Log too.
-        configure_logging(gui_sink=self._panels["Library"]._on_log)
+        lib = self._panels["Library"]
+        configure_logging(gui_sink=lib._on_log)
+
+        # Background playlist auto-sync, wired to the panel's thread-safe sinks.
+        self._autosync = AutoSyncManager(
+            self._config, self._manager, self._index,
+            on_log=lib._on_log, on_synced=lib._autosync_event,
+        )
+        lib.set_autosync(self._autosync)
+        self._autosync.start()
+
+        # Keep yt-dlp current (background) so extraction doesn't silently break.
+        if self._config.auto_update_ytdlp:
+            threading.Thread(target=self._run_updater, args=(lib,), daemon=True).start()
 
         if self._needs_setup():
             self._panels["Setup"] = SetupWizard(content, self._config, on_complete=self._finish_setup)
             self._show("Setup")
         else:
             self._show("Library")
+
+    def _run_updater(self, lib: "LibraryPanel") -> None:
+        if update_ytdlp(on_log=lib._on_log) == UPDATED:
+            lib._post_toast("⬆ yt-dlp updated to the latest version", color=INFO)
 
     def _needs_setup(self) -> bool:
         return not (self._config.spotify_client_id or self._config.soundcloud_username)
@@ -1025,6 +1360,8 @@ class App(ctk.CTk):
             btn.configure(fg_color=NAVY_LIGHT if n == name else "transparent")
 
     def _on_close(self) -> None:
+        if self._autosync is not None:
+            self._autosync.stop()
         self._manager.stop()
         lib = self._panels.get("Library")
         if lib is not None:

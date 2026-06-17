@@ -15,6 +15,21 @@
   fragments per track, and `aria2c` (16-way) when present.
 - 🛡️ **Resilient by design** — jittered exponential-backoff retries, per-source
   circuit breakers, and post-download size + checksum verification.
+- 📊 **Live progress** — per-track progress bars with speed + ETA, parsed
+  straight from the downloader, plus a batch progress strip.
+- ▶️ **30-second previews** — audition a track before downloading (uses the
+  `ffplay`/`mpv` already on your system).
+- ✅ **Multi-select** — click to (de)select, **shift-click** for a range, then
+  download just the selection.
+- 🔄 **Playlist auto-sync** — flag a playlist and Sub-Scraper periodically grabs
+  only the newly-added tracks in the background.
+- 🔔 **Finish notifications** — a native OS notification (and an in-app toast)
+  when a batch completes, so you can walk away.
+- 📂 **Right-click a track** — reveal it in your file manager, play the file, or
+  copy "Artist - Title".
+- 🩹 **Self-healing yt-dlp** — silently updates yt-dlp on launch so extraction
+  doesn't break when YouTube/SoundCloud change.
+- 📈 **Library stats** — total downloaded, how many today, and bytes on disk.
 - 🙈 **Hides what you've already got** — downloaded tracks drop out of the list
   by default (toggle "Show downloaded" to reveal them).
 - 🖼️ **Track artwork** — cover art loads lazily off the UI thread (memory + disk
@@ -82,6 +97,9 @@ Settings live in `~/.sub_scraper/config.json` (most are editable in the
 | `verify_downloads` | `true` | Post-download size + SHA-256 verification. |
 | `hide_downloaded` | `true` | Hide already-downloaded tracks from the library. |
 | `output_format` / `audio_quality` | `mp3` / `320k` | Output container and bitrate. |
+| `auto_update_ytdlp` | `true` | Upgrade yt-dlp in the background on launch. |
+| `autosync_interval_hours` | `6.0` | How often auto-synced playlists are re-checked. |
+| `autosync` | `{}` | Playlists kept in sync (managed from the Library tab). |
 
 ## Tests
 
