@@ -5,6 +5,7 @@
 let _source = "spotify";
 let _tracks = [];
 let _sse = null;
+let _demoMode = false; // true while the no-credentials sample library is shown
 let _dlStats = { done: 0, failed: 0, queue: 0, active: 0 };
 let _activeDl = {}; // track_id -> {name, fraction, speed, eta}
 
@@ -76,6 +77,8 @@ async function loadLibrary() {
     }
     const data = await r.json();
     _tracks = data.tracks || [];
+    _demoMode = false;
+    document.getElementById("demo-banner").classList.add("hidden");
     renderTracks(_tracks);
     const pending = _tracks.filter(t => t.status !== "complete").length;
     const done = _tracks.length - pending;
@@ -86,6 +89,35 @@ async function loadLibrary() {
   } finally {
     btn.disabled = false;
     spin.classList.add("hidden");
+  }
+}
+
+// Load a no-setup sample library so first-time visitors can explore the UI.
+async function loadDemo() {
+  const btn = document.getElementById("btn-demo");
+  const status = document.getElementById("library-status");
+
+  btn.disabled = true;
+  status.textContent = "Loading demo…";
+  document.getElementById("track-list").innerHTML = "";
+
+  try {
+    const r = await fetch("/api/library/demo", { method: "POST" });
+    if (!r.ok) {
+      status.textContent = "Couldn't load the demo right now.";
+      return;
+    }
+    const data = await r.json();
+    _tracks = data.tracks || [];
+    _demoMode = true;
+    renderTracks(_tracks);
+    document.getElementById("demo-banner").classList.remove("hidden");
+    document.getElementById("track-controls").style.display = _tracks.length ? "flex" : "none";
+    status.textContent = `${_tracks.length} sample tracks — explore freely, then add your keys to load your real library.`;
+  } catch (e) {
+    status.textContent = "Network error: " + e.message;
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -182,6 +214,15 @@ async function downloadAll() {
 }
 
 async function submitDownload(ids) {
+  if (_demoMode) {
+    alert(
+      "This is the demo library 🎧\n\n" +
+      "To download for real, open Settings and add your own free Spotify or " +
+      "SoundCloud credentials — it takes about 2 minutes."
+    );
+    showSection("settings");
+    return;
+  }
   showSection("downloads");
   try {
     const r = await fetch("/api/downloads/submit", {

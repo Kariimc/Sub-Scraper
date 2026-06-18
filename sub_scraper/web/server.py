@@ -41,7 +41,7 @@ _STATIC_DIR = Path(__file__).parent / "static"
 # App
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="Sub-Scraper", version="2.1")
+app = FastAPI(title="Sub-Scraper", version="2.2")
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +122,45 @@ def _get_or_init_manager() -> DownloadManager:
     return _manager
 
 
+# IDs in the no-setup demo library all carry this prefix so the download path
+# can recognise and politely refuse them.
+_DEMO_PREFIX = "demo-"
+
+
+def _demo_library() -> list[Track]:
+    """A fixed sample library so a first-time visitor can explore the whole UI
+    with zero credentials. These tracks are *not* downloadable — submitting one
+    returns a friendly nudge to add real keys (see :func:`submit_downloads`)."""
+    # (title, artist, album, minutes, seconds, already_downloaded?)
+    raw = [
+        ("Midnight City", "M83", "Hurry Up, We're Dreaming", 4, 3, True),
+        ("Redbone", "Childish Gambino", "Awaken, My Love!", 5, 27, True),
+        ("Dreams", "Fleetwood Mac", "Rumours", 4, 14, False),
+        ("Tame", "Pixies", "Doolittle", 1, 55, False),
+        ("Nightcall", "Kavinsky", "OutRun", 4, 18, False),
+        ("Bohemian Rhapsody", "Queen", "A Night at the Opera", 5, 55, False),
+        ("Electric Feel", "MGMT", "Oracular Spectacular", 3, 49, False),
+        ("Teardrop", "Massive Attack", "Mezzanine", 5, 30, False),
+        ("Tighten Up", "The Black Keys", "Brothers", 3, 30, False),
+        ("Feel Good Inc.", "Gorillaz", "Demon Days", 3, 41, False),
+        ("Solo Dance", "Martin Jensen", "Solo Dance", 2, 53, False),
+        ("Instant Crush", "Daft Punk", "Random Access Memories", 5, 37, False),
+    ]
+    tracks: list[Track] = []
+    for i, (title, artist, album, mm, ss, done) in enumerate(raw, start=1):
+        tracks.append(
+            Track(
+                id=f"{_DEMO_PREFIX}{i}",
+                title=title,
+                artist=artist,
+                album=album,
+                duration_ms=(mm * 60 + ss) * 1000,
+                status=DownloadStatus.COMPLETE if done else DownloadStatus.PENDING,
+            )
+        )
+    return tracks
+
+
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
@@ -156,7 +195,7 @@ async def root() -> HTMLResponse:
 
 @app.get("/api/health")
 async def health() -> dict:
-    return {"status": "ok", "version": "2.1"}
+    return {"status": "ok", "version": "2.2"}
 
 
 @app.get("/api/config")
@@ -249,6 +288,14 @@ async def load_library(body: dict) -> dict:
     return {"tracks": [_track_to_dict(t) for t in tracks]}
 
 
+@app.post("/api/library/demo")
+async def load_demo_library() -> dict:
+    """Load a no-credentials sample library so visitors can explore instantly."""
+    global _library
+    _library = _demo_library()
+    return {"tracks": [_track_to_dict(t) for t in _library], "demo": True}
+
+
 @app.get("/api/library")
 async def get_library() -> dict:
     return {"tracks": [_track_to_dict(t) for t in _library]}
@@ -268,6 +315,14 @@ async def submit_downloads(body: dict) -> dict:
     selected = [t for t in _library if t.id in id_set]
     if not selected:
         raise HTTPException(status_code=400, detail="No matching tracks found in library")
+
+    # The sample library is for exploring only — never actually download it.
+    if any(t.id.startswith(_DEMO_PREFIX) for t in selected):
+        raise HTTPException(
+            status_code=400,
+            detail="This is the demo library. Open Settings and add your own free "
+                   "Spotify or SoundCloud credentials to download real tracks.",
+        )
 
     mgr = _get_or_init_manager()
 

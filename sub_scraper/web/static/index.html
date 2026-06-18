@@ -61,6 +61,16 @@
             <span id="load-spinner" class="spinner hidden"></span>
             Load Library
           </button>
+          <button class="btn btn-ghost" id="btn-demo" onclick="loadDemo()">
+            Try a Demo
+          </button>
+        </div>
+
+        <div id="demo-banner" class="notice notice--info hidden">
+          👋 <strong>You're exploring a demo library</strong> — these are sample
+          tracks so you can see how everything works. Downloads are disabled until
+          you add your own free credentials in
+          <a href="#" onclick="showSection('settings');return false;">Settings</a>.
         </div>
 
         <div id="library-status" class="library-status"></div>

@@ -10,6 +10,28 @@
 
 ---
 
+## 🚀 Try it instantly — no install, no coding
+
+Launch your own free, private copy in the browser. One click, a GitHub login, and
+~3 minutes for the first build — that's it.
+
+<div align="center">
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Kariimc/Sub-Scraper)
+
+</div>
+
+Once it's live, open your link and click **"Try a Demo"** on the Library tab to
+explore the app with sample tracks — zero setup. When you're ready for your real
+music, open **Settings**, paste your own free [Spotify keys](SETUP.md), and **Save**.
+
+> **Sharing with friends?** Send them the same button — each person gets their own
+> private instance with their own credentials. Nothing is shared between copies.
+> Free instances sleep after 15 min idle (≈30 s to wake). Full walkthrough and
+> other hosting options: [`WEB_DEPLOY.md`](WEB_DEPLOY.md).
+
+---
+
 ## Features
 
 - 🎧 **Spotify & SoundCloud** — liked songs and playlists, with a guided first-run setup.

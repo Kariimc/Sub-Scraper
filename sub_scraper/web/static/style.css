@@ -244,6 +244,8 @@ body {
 
 .notice { padding: 12px 16px; border-radius: var(--radius); font-size: 13px; margin-bottom: 20px; }
 .notice--warn { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; }
+.notice--info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+.notice--info a { color: var(--blue); font-weight: 600; }
 
 /* SPINNER */
 .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4); border-top-color: var(--white); border-radius: 50%; animation: spin .7s linear infinite; }
