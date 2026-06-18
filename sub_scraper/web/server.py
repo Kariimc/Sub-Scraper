@@ -188,6 +188,21 @@ async def load_library(body: dict) -> dict:
     if source not in (SPOTIFY, SOUNDCLOUD):
         raise HTTPException(status_code=400, detail=f"Unknown source: {source!r}")
 
+    # Friendly credential precheck so first-time users get a clear pointer to
+    # Settings instead of a raw library-provider error.
+    if source == SPOTIFY and not (_config.spotify_client_id and _config.spotify_client_secret):
+        raise HTTPException(
+            status_code=400,
+            detail="Spotify isn't set up yet. Open Settings and add your Spotify "
+                   "Client ID and Client Secret, then Save.",
+        )
+    if source == SOUNDCLOUD and not (_config.soundcloud_username or _config.soundcloud_auth_token):
+        raise HTTPException(
+            status_code=400,
+            detail="SoundCloud isn't set up yet. Open Settings and add your "
+                   "SoundCloud username (and token for playlists), then Save.",
+        )
+
     try:
         scraper = build_scraper(_config, source)
     except Exception as exc:
@@ -201,7 +216,7 @@ async def load_library(body: dict) -> dict:
     try:
         tracks: list[Track] = await loop.run_in_executor(None, _fetch)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch library: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Couldn't load your library: {exc}") from exc
 
     # Annotate tracks that are already downloaded
     for track in tracks:

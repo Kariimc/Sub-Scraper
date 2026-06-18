@@ -71,13 +71,28 @@ pip install -r requirements-web.txt
 python web_run.py          # → http://localhost:8080
 ```
 
-### Deploy to Railway (one-click hosted URL)
+### Get a shareable link (one-click hosting)
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/new?template=https://github.com/Kariimc/Sub-Scraper)
+Want a URL your friends can open? Deploy your own free instance — it builds from
+the included `Dockerfile`, gives you a public `https://…` address in a couple of
+minutes, and stays private to you (each instance uses its own credentials).
 
-Clicking the button above provisions your own private instance with a public
-URL (e.g. `sub-scraper-xxx.up.railway.app`). Add your Spotify/SoundCloud
-credentials in the Settings page — nothing is shared between instances.
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Kariimc/Sub-Scraper)
+&nbsp;
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new)
+
+- **Render** (easiest): click the button → "Connect" the repo → "Apply". When it
+  goes live you'll get a link like `https://sub-scraper.onrender.com`.
+- **Railway**: click → "Deploy from GitHub repo" → pick this repo. You'll get a
+  link like `https://sub-scraper-production.up.railway.app`.
+
+Then open the link, go to **Settings**, paste in your Spotify / SoundCloud
+credentials, and **Save**. See [`WEB_DEPLOY.md`](WEB_DEPLOY.md) for the full
+walkthrough (and how to let friends try it on your local network in 30 seconds).
+
+> ⚠️ Hosted instances download to the *server's* disk and free tiers sleep when
+> idle — great for trying it out and browsing libraries. For keeping a big music
+> collection (and the **Device Sync** feature), run the desktop app.
 
 ## Download-engine architecture
 

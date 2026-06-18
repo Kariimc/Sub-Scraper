@@ -1,0 +1,15 @@
+# Render.com Blueprint — one-click deploy of the Sub-Scraper web UI.
+# Friends can launch their own instance via the "Deploy to Render" button in the
+# README; each instance is private and uses its own API credentials.
+services:
+  - type: web
+    name: sub-scraper
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    autoDeploy: false
+    envVars:
+      # Render injects $PORT automatically; web_run.py honours it.
+      - key: PYTHONUNBUFFERED
+        value: "1"
