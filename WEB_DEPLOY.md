@@ -74,6 +74,19 @@ from the included `Dockerfile` and read your `$PORT` automatically.
    like **`https://sub-scraper-production.up.railway.app`**.
 5. Open it → **Settings** → paste your credentials → **Save**.
 
+### Keep it auto-updating on every push
+
+Both platforms can redeploy automatically whenever you push, so your hosted link
+always runs the latest version:
+
+- **Railway:** automatic once the repo is connected — nothing else to do.
+- **Render:** copy your service's **Deploy Hook** (service → Settings → Deploy
+  Hook), then in GitHub add it as a secret: repo → **Settings → Secrets and
+  variables → Actions → New repository secret**, name it **`RENDER_DEPLOY_HOOK`**.
+  The included `.github/workflows/ci.yml` runs the tests on every push and, when
+  that secret is present, pings the hook to deploy. No secret = it just runs the
+  tests and skips deploying.
+
 ---
 
 ## Important notes for hosted instances

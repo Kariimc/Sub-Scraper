@@ -1,0 +1,58 @@
+name: CI
+
+# Runs the headless test suite on every push / PR, then (on the default branch)
+# optionally pings a Render deploy hook so the hosted web link stays current.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-web.txt
+
+      - name: Run headless test suite
+        run: python tests/test_core.py
+
+      - name: Import-smoke the web server
+        run: python -c "import sub_scraper.web.server; print('web server imports OK')"
+
+  deploy:
+    name: Deploy (Render)
+    needs: test
+    runs-on: ubuntu-latest
+    # Only auto-deploy real pushes to the repo's default branch, never PRs.
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    steps:
+      - name: Trigger Render deploy if a hook is configured
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -n "$RENDER_DEPLOY_HOOK" ]; then
+            echo "Triggering Render deploy…"
+            curl -fsSL -X POST "$RENDER_DEPLOY_HOOK"
+            echo "✓ Deploy triggered — your hosted link will update in a few minutes."
+          else
+            echo "No RENDER_DEPLOY_HOOK secret set, so there's nothing to deploy."
+            echo "To enable one-push auto-deploy:"
+            echo "  1. In Render: your service → Settings → Deploy Hook → copy the URL."
+            echo "  2. In GitHub: repo → Settings → Secrets and variables → Actions →"
+            echo "     New repository secret named RENDER_DEPLOY_HOOK, paste the URL."
+            echo "(Railway auto-deploys on push automatically once the repo is connected.)"
+          fi
