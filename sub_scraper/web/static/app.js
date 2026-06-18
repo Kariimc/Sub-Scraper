@@ -6,6 +6,7 @@ let _source = "spotify";
 let _tracks = [];
 let _sse = null;
 let _demoMode = false; // true while the no-credentials sample library is shown
+let _envLocked = new Set(); // field names pre-configured via server env vars
 let _dlStats = { done: 0, failed: 0, queue: 0, active: 0 };
 let _activeDl = {}; // track_id -> {name, fraction, speed, eta}
 
@@ -395,6 +396,39 @@ async function loadConfig() {
     set("f-quality",        cfg.audio_quality);
     set("f-concurrent",     cfg.max_concurrent);
 
+    // Mark fields that are pre-configured via server environment variables.
+    _envLocked = new Set(cfg.env_locked || []);
+    const fieldToInputId = {
+      spotify_client_id:     "f-spotify-id",
+      spotify_client_secret: "f-spotify-secret",
+      soundcloud_username:   "f-sc-user",
+      soundcloud_auth_token: "f-sc-token",
+    };
+    for (const [fieldName, inputId] of Object.entries(fieldToInputId)) {
+      const el = document.getElementById(inputId);
+      if (!el) continue;
+      if (_envLocked.has(fieldName)) {
+        el.disabled = true;
+        el.placeholder = "Pre-configured via environment variable";
+        el.title = "Locked — set via server environment variable";
+        const row = el.closest(".form-row");
+        if (row && !row.querySelector(".lock-badge")) {
+          const badge = document.createElement("span");
+          badge.className = "lock-badge";
+          badge.textContent = "locked";
+          row.querySelector("label").appendChild(badge);
+        }
+        const revealBtn = el.parentElement.querySelector(".reveal-btn");
+        if (revealBtn) revealBtn.style.display = "none";
+      } else {
+        el.disabled = false;
+        const row = el.closest(".form-row");
+        if (row) row.querySelector(".lock-badge")?.remove();
+        const revealBtn = el.parentElement.querySelector(".reveal-btn");
+        if (revealBtn) revealBtn.style.display = "";
+      }
+    }
+
     // Show first-run notice if no credentials
     const hasCredentials = cfg.spotify_client_id || cfg.soundcloud_username;
     const notice = document.getElementById("first-run-notice");
@@ -409,16 +443,18 @@ async function saveConfig(silent) {
   // Secret fields load blank (they're masked). If left blank, send the mask
   // placeholder so the server KEEPS the stored secret instead of wiping it.
   const keepIfBlank = v => (v && v.trim()) ? v : "••••••••";
+  // Env-locked fields are read-only on the server — omit them from the payload.
+  const skip = f => _envLocked.has(f);
 
   const body = {
-    spotify_client_id:     form.spotify_client_id.value,
-    spotify_client_secret: keepIfBlank(form.spotify_client_secret.value),
-    soundcloud_username:   form.soundcloud_username.value,
-    soundcloud_auth_token: keepIfBlank(form.soundcloud_auth_token.value),
-    download_path:         form.download_path.value,
-    output_format:         form.output_format.value,
-    audio_quality:         form.audio_quality.value,
-    max_concurrent:        parseInt(form.max_concurrent.value) || 6,
+    ...(!skip("spotify_client_id")     && { spotify_client_id:     form.spotify_client_id.value }),
+    ...(!skip("spotify_client_secret") && { spotify_client_secret: keepIfBlank(form.spotify_client_secret.value) }),
+    ...(!skip("soundcloud_username")   && { soundcloud_username:   form.soundcloud_username.value }),
+    ...(!skip("soundcloud_auth_token") && { soundcloud_auth_token: keepIfBlank(form.soundcloud_auth_token.value) }),
+    download_path:  form.download_path.value,
+    output_format:  form.output_format.value,
+    audio_quality:  form.audio_quality.value,
+    max_concurrent: parseInt(form.max_concurrent.value) || 6,
   };
 
   try {

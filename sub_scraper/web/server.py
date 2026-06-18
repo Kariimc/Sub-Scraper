@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import queue
 import time
 from dataclasses import asdict
@@ -24,6 +25,7 @@ from sub_scraper.scrapers.factory import SOUNDCLOUD, SPOTIFY, build_scraper
 # ---------------------------------------------------------------------------
 
 _config: Config = Config.load()
+_env_locked: frozenset[str] = frozenset(Config.env_locked_fields())
 _index: DownloadIndex = DownloadIndex()
 _manager: DownloadManager | None = None
 _library: list[Track] = []
@@ -200,19 +202,23 @@ async def health() -> dict:
 
 @app.get("/api/config")
 async def get_config() -> dict:
-    return _mask_config(_config)
+    data = _mask_config(_config)
+    data["env_locked"] = sorted(_env_locked)
+    return data
 
 
 @app.post("/api/config")
 async def post_config(body: dict) -> dict:
-    # Only update fields that actually exist on Config
     import dataclasses
 
     field_names = {f.name for f in dataclasses.fields(_config)}
     for key, value in body.items():
         if key not in field_names:
             continue
-        # Don't overwrite secrets if the client sent back the mask placeholder
+        # Env-locked fields are read from env vars at startup — never overwrite.
+        if key in _env_locked:
+            continue
+        # Don't overwrite secrets if the client sent back the mask placeholder.
         if key in _SECRET_FIELDS and value == "••••••••":
             continue
         setattr(_config, key, value)

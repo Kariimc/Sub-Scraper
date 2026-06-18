@@ -1,8 +1,19 @@
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 CONFIG_PATH = Path.home() / ".sub_scraper" / "config.json"
+
+# Credential fields overridable via environment variables.
+# Set these in the Render/Railway dashboard to pre-authenticate a personal
+# instance without ever committing secrets to the repo.
+_ENV_CREDENTIAL_MAP: dict[str, str] = {
+    "spotify_client_id":     "SPOTIFY_CLIENT_ID",
+    "spotify_client_secret": "SPOTIFY_CLIENT_SECRET",
+    "soundcloud_username":   "SOUNDCLOUD_USERNAME",
+    "soundcloud_auth_token": "SOUNDCLOUD_AUTH_TOKEN",
+}
 
 
 @dataclass
@@ -73,10 +84,27 @@ class Config:
     @classmethod
     def load(cls) -> "Config":
         if not CONFIG_PATH.exists():
-            return cls()
-        try:
-            data = json.loads(CONFIG_PATH.read_text())
-            valid = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
-            return cls(**valid)
-        except (json.JSONDecodeError, TypeError):
-            return cls()
+            cfg = cls()
+        else:
+            try:
+                data = json.loads(CONFIG_PATH.read_text())
+                valid = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+                cfg = cls(**valid)
+            except (json.JSONDecodeError, TypeError):
+                cfg = cls()
+        # Env vars take precedence over stored credentials so a personal hosted
+        # instance stays authenticated across container restarts without Settings.
+        for field_name, env_var in _ENV_CREDENTIAL_MAP.items():
+            val = os.environ.get(env_var, "").strip()
+            if val:
+                setattr(cfg, field_name, val)
+        return cfg
+
+    @staticmethod
+    def env_locked_fields() -> set[str]:
+        """Return field names whose value is pinned to an environment variable."""
+        return {
+            field_name
+            for field_name, env_var in _ENV_CREDENTIAL_MAP.items()
+            if os.environ.get(env_var, "").strip()
+        }
