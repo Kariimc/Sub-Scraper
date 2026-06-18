@@ -16,6 +16,7 @@ archive.txt
 # Credentials / secrets
 *.json
 !requirements.txt
+!railway.json
 *.pkl
 .env
 .env.*

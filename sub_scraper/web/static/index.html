@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sub-Scraper</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <!-- ===== LAYOUT ===== -->
+  <div class="shell">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-icon">&#9654;</span>
+        <div>
+          <div class="brand-name">Sub-Scraper</div>
+          <div class="brand-tagline">Music download manager</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-section="library" onclick="showSection('library')">
+          <span class="nav-icon">&#9834;</span>
+          <span>Library</span>
+        </button>
+        <button class="nav-item" data-section="downloads" onclick="showSection('downloads')">
+          <span class="nav-icon">&#8595;</span>
+          <span>Downloads</span>
+          <span class="nav-badge" id="nav-badge-downloads" style="display:none">0</span>
+        </button>
+        <button class="nav-item" data-section="settings" onclick="showSection('settings')">
+          <span class="nav-icon">&#9881;</span>
+          <span>Settings</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="status-dot" id="status-dot" title="Server status"></div>
+        <span id="status-label" class="status-label">Connecting…</span>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+
+      <!-- ===== LIBRARY SECTION ===== -->
+      <section id="section-library" class="section active">
+        <div class="section-header">
+          <h1>Library</h1>
+          <p class="section-desc">Load your music library then select tracks to download.</p>
+        </div>
+
+        <div class="toolbar">
+          <div class="source-pills">
+            <button class="pill active" id="pill-spotify" onclick="setSource('spotify')">Spotify</button>
+            <button class="pill" id="pill-soundcloud" onclick="setSource('soundcloud')">SoundCloud</button>
+          </div>
+          <button class="btn btn-primary" id="btn-load" onclick="loadLibrary()">
+            <span id="load-spinner" class="spinner hidden"></span>
+            Load Library
+          </button>
+        </div>
+
+        <div id="library-status" class="library-status"></div>
+
+        <!-- Track list controls -->
+        <div class="track-controls" id="track-controls" style="display:none">
+          <label class="select-all-label">
+            <input type="checkbox" id="chk-all" onchange="toggleSelectAll(this.checked)" />
+            <span>Select All</span>
+          </label>
+          <div class="track-actions">
+            <button class="btn btn-sm btn-ghost" onclick="toggleSelectAll(false)">Deselect All</button>
+            <button class="btn btn-sm btn-secondary" onclick="downloadSelected()">Download Selected</button>
+            <button class="btn btn-sm btn-primary" onclick="downloadAll()">Download All</button>
+          </div>
+        </div>
+
+        <div id="track-list" class="track-list"></div>
+      </section>
+
+      <!-- ===== DOWNLOADS SECTION ===== -->
+      <section id="section-downloads" class="section">
+        <div class="section-header">
+          <h1>Downloads</h1>
+          <p class="section-desc">Live download progress and logs.</p>
+        </div>
+
+        <div class="dl-stats" id="dl-stats">
+          <div class="stat-card">
+            <span class="stat-num" id="stat-done">0</span>
+            <span class="stat-lbl">Done</span>
+          </div>
+          <div class="stat-card stat-card--error">
+            <span class="stat-num" id="stat-failed">0</span>
+            <span class="stat-lbl">Failed</span>
+          </div>
+          <div class="stat-card stat-card--info">
+            <span class="stat-num" id="stat-queue">0</span>
+            <span class="stat-lbl">In Queue</span>
+          </div>
+          <div class="stat-card stat-card--active">
+            <span class="stat-num" id="stat-active">0</span>
+            <span class="stat-lbl">Active</span>
+          </div>
+          <button class="btn btn-sm btn-danger" style="margin-left:auto" onclick="cancelAll()">Cancel All</button>
+        </div>
+
+        <div id="dl-track-list" class="dl-track-list"></div>
+
+        <div class="log-section">
+          <div class="log-header">
+            <span>Log</span>
+            <button class="btn btn-xs btn-ghost" onclick="clearLog()">Clear</button>
+          </div>
+          <div id="log-console" class="log-console"></div>
+        </div>
+      </section>
+
+      <!-- ===== SETTINGS SECTION ===== -->
+      <section id="section-settings" class="section">
+        <div class="section-header">
+          <h1>Settings</h1>
+          <p class="section-desc">Configure your API credentials and download preferences.</p>
+        </div>
+
+        <div id="first-run-notice" class="notice notice--warn hidden">
+          <strong>First run:</strong> No credentials detected. Add your Spotify or SoundCloud credentials below to get started.
+        </div>
+
+        <form id="settings-form" onsubmit="return false">
+
+          <div class="settings-group">
+            <h2 class="settings-group-title">Spotify</h2>
+            <div class="form-row">
+              <label for="f-spotify-id">Client ID</label>
+              <input type="text" id="f-spotify-id" name="spotify_client_id" autocomplete="off" placeholder="Enter Spotify client ID" />
+            </div>
+            <div class="form-row">
+              <label for="f-spotify-secret">Client Secret</label>
+              <div class="password-row">
+                <input type="password" id="f-spotify-secret" name="spotify_client_secret" autocomplete="new-password" placeholder="Enter Spotify client secret" />
+                <button type="button" class="btn btn-xs btn-ghost reveal-btn" onclick="toggleReveal('f-spotify-secret', this)">Show</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h2 class="settings-group-title">SoundCloud</h2>
+            <div class="form-row">
+              <label for="f-sc-user">Username</label>
+              <input type="text" id="f-sc-user" name="soundcloud_username" autocomplete="off" placeholder="Enter SoundCloud username" />
+            </div>
+            <div class="form-row">
+              <label for="f-sc-token">Auth Token</label>
+              <div class="password-row">
+                <input type="password" id="f-sc-token" name="soundcloud_auth_token" autocomplete="new-password" placeholder="Enter SoundCloud auth token" />
+                <button type="button" class="btn btn-xs btn-ghost reveal-btn" onclick="toggleReveal('f-sc-token', this)">Show</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h2 class="settings-group-title">Output</h2>
+            <div class="form-row">
+              <label for="f-dl-path">Download Folder</label>
+              <input type="text" id="f-dl-path" name="download_path" placeholder="~/Music/SubScraper" />
+            </div>
+            <div class="form-row">
+              <label for="f-format">Format</label>
+              <select id="f-format" name="output_format">
+                <option value="mp3">MP3</option>
+                <option value="flac">FLAC</option>
+                <option value="ogg">OGG</option>
+                <option value="m4a">M4A</option>
+                <option value="opus">OPUS</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label for="f-quality">Quality</label>
+              <select id="f-quality" name="audio_quality">
+                <option value="320k">320 kbps (best)</option>
+                <option value="256k">256 kbps</option>
+                <option value="192k">192 kbps</option>
+                <option value="128k">128 kbps</option>
+                <option value="96k">96 kbps</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label for="f-concurrent">Max Concurrent Downloads</label>
+              <input type="number" id="f-concurrent" name="max_concurrent" min="1" max="20" />
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <span id="save-status" class="save-status"></span>
+            <button type="button" class="btn btn-primary" onclick="saveConfig()">Save Settings</button>
+          </div>
+
+        </form>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

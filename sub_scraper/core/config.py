@@ -61,8 +61,14 @@ class Config:
     use_gdrive: bool = False
 
     def save(self) -> None:
-        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CONFIG_PATH.write_text(json.dumps(asdict(self), indent=2))
+        try:
+            CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            # Write to a temp file then rename so a crash mid-write never corrupts.
+            tmp = CONFIG_PATH.with_suffix(".tmp")
+            tmp.write_text(json.dumps(asdict(self), indent=2))
+            tmp.replace(CONFIG_PATH)
+        except OSError:
+            pass  # best-effort; never crash the app over a config save failure
 
     @classmethod
     def load(cls) -> "Config":

@@ -38,8 +38,10 @@
   cached, keyed by URL) so even a 1000-track library stays smooth.
 - ☁️ **Optional Google Drive sync** — see [`GDRIVE_SETUP.md`](GDRIVE_SETUP.md).
 - 🎨 **Professional blue / orange / white UI** with a custom brand mark.
+- 📱 **Device Sync** — push your library to any USB audio player or portable device in HiFi quality (flat or Artist/Album layout, optional ffmpeg transcoding).
+- 🌐 **Web UI** — run `python web_run.py` to get a browser-based interface on port 8080; deploy to Railway with one click for remote access.
 
-## Install & run
+## Install & run (desktop app)
 
 > First time? The [**Setup Guide**](SETUP.md) walks you through ffmpeg, getting
 > Spotify keys, and the SoundCloud token — step by step. The quick version:
@@ -57,6 +59,25 @@ External tools used for extraction: [`yt-dlp`](https://github.com/yt-dlp/yt-dlp)
 and [`spotdl`](https://github.com/spotDL/spotify-downloader) (installed via
 `requirements.txt`); `ffmpeg` is required for audio conversion and `aria2c` is
 an optional accelerator.
+
+## Web UI
+
+The web interface exposes the full download engine as a browser app — useful for
+running Sub-Scraper on a NAS, headless server, or sharing access with friends
+(each user brings their own API credentials).
+
+```bash
+pip install -r requirements-web.txt
+python web_run.py          # → http://localhost:8080
+```
+
+### Deploy to Railway (one-click hosted URL)
+
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/new?template=https://github.com/Kariimc/Sub-Scraper)
+
+Clicking the button above provisions your own private instance with a public
+URL (e.g. `sub-scraper-xxx.up.railway.app`). Add your Spotify/SoundCloud
+credentials in the Settings page — nothing is shared between instances.
 
 ## Download-engine architecture
 

@@ -121,6 +121,19 @@ class DownloadIndex:
         log.info("index.cleared " + kv(count=count))
         return count
 
+    def all_entries(self) -> list[dict]:
+        """Return a snapshot of all index entries (each is a plain dict with
+        keys: title, artist, path, size, sha256, ts). Entries whose file no
+        longer exists are excluded."""
+        with self._lock:
+            entries = [(k, dict(v)) for k, v in self._entries.items()]
+        result = []
+        for _k, e in entries:
+            path = e.get("path")
+            if path and Path(path).exists():
+                result.append(e)
+        return result
+
     def __len__(self) -> int:
         with self._lock:
             return len(self._entries)

@@ -18,6 +18,7 @@ from ..core.updater import UPDATED, update_ytdlp
 from .artwork import ArtworkLoader, make_placeholder
 from .logo import get_ctk_image, set_window_icon
 from .preview import PreviewPlayer
+from .device_panel import DevicePanel
 from .wizard import SetupWizard
 from ..scrapers.base import DownloadStatus, Track
 from ..scrapers.factory import SPOTIFY, build_scraper
@@ -529,28 +530,39 @@ class LibraryPanel(ctk.CTkFrame):
         try:
             for _ in range(500):  # cap per tick so the UI stays responsive
                 event = self._events.get_nowait()
-                kind = event[0]
-                if kind == "log":
-                    self._append_log(event[1])
-                elif kind == "progress":
-                    self._handle_progress(event[1], event[2])
-                elif kind == "populate":
-                    self._populate(event[1])
-                elif kind == "playlists":
-                    self._on_playlists_loaded(event[1], event[2])
-                elif kind == "artwork":
-                    self._apply_artwork(event[1], event[2])
-                elif kind == "fetch_error":
-                    self._on_fetch_error(event[1])
-                elif kind == "toast":
-                    self._toast(event[1], color=event[2])
-                elif kind == "preview_done":
-                    self._on_preview_done(event[1])
-                elif kind == "autosync":
-                    self._on_autosync_done(event[1], event[2])
+                try:
+                    kind = event[0]
+                    if kind == "log":
+                        self._append_log(event[1])
+                    elif kind == "progress":
+                        self._handle_progress(event[1], event[2])
+                    elif kind == "populate":
+                        self._populate(event[1])
+                    elif kind == "playlists":
+                        self._on_playlists_loaded(event[1], event[2])
+                    elif kind == "artwork":
+                        self._apply_artwork(event[1], event[2])
+                    elif kind == "fetch_error":
+                        self._on_fetch_error(event[1])
+                    elif kind == "toast":
+                        self._toast(event[1], color=event[2])
+                    elif kind == "preview_done":
+                        self._on_preview_done(event[1])
+                    elif kind == "autosync":
+                        self._on_autosync_done(event[1], event[2])
+                except Exception as _e:  # noqa: BLE001 — one bad event must never stop the loop
+                    try:
+                        self._append_log(f"[UI] event error ({kind}): {_e}")
+                    except Exception:
+                        pass
         except queue.Empty:
             pass
-        self.after(100, self._process_events)
+        # Reschedule unconditionally — even if something above raised, the loop
+        # must keep running or the whole GUI becomes unresponsive.
+        try:
+            self.after(100, self._process_events)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Download progress / status bar
@@ -1061,6 +1073,12 @@ class LibraryPanel(ctk.CTkFrame):
         if not jobs:
             messagebox.showinfo("Sub-Scraper", "Those tracks are already downloaded.")
             return
+        # Ensure the output directory exists before any job tries to write to it.
+        try:
+            Path(self._config.download_path).mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            messagebox.showerror("Sub-Scraper", f"Cannot create download folder:\n{exc}")
+            return
         self._maybe_configure_gdrive()
         self._begin_batch(len(jobs))
         self._manager.submit_batch(jobs)
@@ -1297,7 +1315,7 @@ class App(ctk.CTk):
         ctk.CTkLabel(brand, text="Sub-Scraper", font=FONT_BRAND, text_color=WHITE).pack(pady=(10, 0))
         ctk.CTkFrame(brand, height=3, width=50, fg_color=ORANGE, corner_radius=2).pack(pady=(8, 0))
 
-        for name in ("Library", "Settings"):
+        for name in ("Library", "Device", "Settings"):
             btn = ctk.CTkButton(
                 sidebar, text=name, anchor="w", width=178, height=40,
                 fg_color="transparent", hover_color=NAVY_LIGHT,
@@ -1308,7 +1326,7 @@ class App(ctk.CTk):
             self._nav_btns[name] = btn
 
         ctk.CTkLabel(
-            sidebar, text="v2.1  ·  async engine", font=FONT_SMALL,
+            sidebar, text="v2.2  ·  async engine", font=FONT_SMALL,
             text_color=TEXT_ON_NAVY_MUTED,
         ).pack(side="bottom", pady=16)
 
@@ -1316,6 +1334,7 @@ class App(ctk.CTk):
         content.pack(side="left", fill="both", expand=True)
 
         self._panels["Library"] = LibraryPanel(content, self._config, self._manager, self._index)
+        self._panels["Device"] = DevicePanel(content, self._config, self._index)
         self._panels["Settings"] = SettingsPanel(content, self._config, self._index)
 
         # Now that the Library panel (and its thread-safe log sink) exists, route
@@ -1360,10 +1379,22 @@ class App(ctk.CTk):
             btn.configure(fg_color=NAVY_LIGHT if n == name else "transparent")
 
     def _on_close(self) -> None:
-        if self._autosync is not None:
-            self._autosync.stop()
-        self._manager.stop()
-        lib = self._panels.get("Library")
-        if lib is not None:
-            lib.shutdown()
-        self.destroy()
+        try:
+            if self._autosync is not None:
+                self._autosync.stop()
+        except Exception:
+            pass
+        try:
+            self._manager.stop()
+        except Exception:
+            pass
+        try:
+            lib = self._panels.get("Library")
+            if lib is not None:
+                lib.shutdown()
+        except Exception:
+            pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
