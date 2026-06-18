@@ -10,11 +10,18 @@ import customtkinter as ctk
 from ..core.config import Config
 from .logo import get_ctk_image
 from .styles import (
-    BLUE, BLUE_HOVER, BORDER, FONT_BRAND, FONT_MEDIUM, FONT_SMALL, FONT_TITLE,
-    HIGHLIGHT, HIGHLIGHT_HOVER, TEXT_PRIMARY, TEXT_SECONDARY, WHITE,
+    BLUE, BLUE_HOVER, BORDER, CARD_ALT, FONT_BRAND, FONT_MEDIUM, FONT_MONO,
+    FONT_SMALL, FONT_TITLE, HIGHLIGHT, HIGHLIGHT_HOVER, SUCCESS, TEXT_PRIMARY,
+    TEXT_SECONDARY, WHITE,
 )
 
 _STEPS = ["Spotify", "SoundCloud", "Output", "Ready"]
+
+# The redirect URI the Spotify auth flow uses — must be entered verbatim in the
+# Spotify dashboard, so we surface it with a one-click Copy button.
+_SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8888/callback"
+# Full written walkthrough (resolves to the repo's default branch via HEAD).
+_GUIDE_URL = "https://github.com/Kariimc/Sub-Scraper/blob/HEAD/SETUP.md"
 
 
 class SetupWizard(ctk.CTkFrame):
@@ -143,6 +150,43 @@ class SetupWizard(ctk.CTkFrame):
             command=lambda: webbrowser.open(url),
         ).pack(anchor="w", pady=(4, 16))
 
+    def _copy_field(self, label: str, value: str) -> None:
+        """A read-only value shown as a monospace chip with a one-click Copy
+        button — for things that must be entered elsewhere *exactly* (the
+        Spotify redirect URI)."""
+        ctk.CTkLabel(
+            self._content, text=label,
+            font=FONT_MEDIUM, text_color=TEXT_PRIMARY, anchor="w",
+        ).pack(fill="x", pady=(10, 2))
+
+        row = ctk.CTkFrame(self._content, fg_color="transparent")
+        row.pack(anchor="w", pady=(0, 14))
+        ctk.CTkLabel(
+            row, text=value, font=FONT_MONO, text_color=TEXT_PRIMARY,
+            fg_color=CARD_ALT, corner_radius=6, height=36, anchor="w",
+        ).pack(side="left", ipadx=12)
+
+        btn = ctk.CTkButton(
+            row, text="Copy", width=92, height=36,
+            fg_color=BLUE, hover_color=BLUE_HOVER, text_color=WHITE,
+        )
+
+        def _do_copy() -> None:
+            self.clipboard_clear()
+            self.clipboard_append(value)
+            btn.configure(text="Copied ✓", fg_color=SUCCESS)
+            self.after(1500, lambda: btn.configure(text="Copy", fg_color=BLUE))
+
+        btn.configure(command=_do_copy)
+        btn.pack(side="left", padx=8)
+
+    def _guide_link(self, text: str = "Stuck? Open the full step-by-step guide →") -> None:
+        ctk.CTkButton(
+            self._content, text=text, height=28,
+            fg_color="transparent", hover_color=BORDER, text_color=BLUE,
+            anchor="w", command=lambda: webbrowser.open(_GUIDE_URL),
+        ).pack(anchor="w", pady=(14, 0))
+
     # ------------------------------------------------------------------
     # Steps
     # ------------------------------------------------------------------
@@ -150,29 +194,43 @@ class SetupWizard(ctk.CTkFrame):
     def _step_0(self) -> None:
         self._heading("Step 1 — Spotify", "Create a free Spotify developer app (2 minutes)")
         self._note(
-            "1. Click the button below — it opens the Spotify Developer Dashboard in your browser.\n"
-            "2. Log in with your Spotify account.\n"
-            "3. Click  Create App  and give it any name you like.\n"
-            "4. Under  Redirect URIs  add exactly:  http://127.0.0.1:8888/callback\n"
-            "5. Copy the Client ID and Client Secret here."
+            "1. Click the button below to open the Spotify Developer Dashboard.\n"
+            "2. Log in, then click  Create app  (name it anything).\n"
+            "3. In  Redirect URIs, paste the address below and click  Add.\n"
+            "4. Tick  Web API, save, then open  Settings.\n"
+            "5. Copy the Client ID and Client Secret into the boxes here."
         )
         self._link_btn("Open Spotify Developer Dashboard →", "https://developer.spotify.com/dashboard")
+        self._copy_field("Redirect URI — paste this EXACTLY into Spotify:", _SPOTIFY_REDIRECT_URI)
+        self._small_note(
+            "⚠️  It must match exactly — use 127.0.0.1 (not localhost), keep http:// "
+            "and /callback. This is the #1 thing people get wrong."
+        )
         self._field("Client ID", "spotify_client_id")
         self._field("Client Secret (hidden)", "spotify_client_secret", show="*")
+        self._guide_link()
 
     def _step_1(self) -> None:
-        self._heading("Step 2 — SoundCloud", "Enter your SoundCloud username")
+        self._heading("Step 2 — SoundCloud", "Optional — skip if you only use Spotify")
+
         self._note(
-            "Your username is the part after  soundcloud.com/  in your profile URL.\n\n"
+            "For your PUBLIC liked songs, just enter your username — the part after "
+            "soundcloud.com/ in your profile URL.\n"
             "Example:  soundcloud.com/john-doe  →  type  john-doe"
         )
-        self._link_btn("Open SoundCloud Profile →", "https://soundcloud.com/you")
         self._field("SoundCloud Username", "soundcloud_username")
+
         self._small_note(
-            "Your likes need to be set to Public in SoundCloud settings.\n"
-            "If they are private, you can add an Auth Token below (optional)."
+            "Want PLAYLISTS or PRIVATE likes? Add a token (a key your browser "
+            "already has). While logged in at soundcloud.com:\n"
+            "1. Press F12 to open developer tools.\n"
+            "2. Open  Application (Firefox: Storage) → Cookies → https://soundcloud.com.\n"
+            "3. Find  oauth_token, copy its value (looks like 2-123456-7890-AbCd…),\n"
+            "4. Paste it below."
         )
-        self._field("Auth Token — optional", "soundcloud_auth_token", show="*")
+        self._field("Auth Token — optional (for playlists / private likes)",
+                    "soundcloud_auth_token", show="*")
+        self._guide_link("See the full SoundCloud token walkthrough →")
 
     def _step_2(self) -> None:
         self._heading("Step 3 — Output", "Where should your music be saved?")

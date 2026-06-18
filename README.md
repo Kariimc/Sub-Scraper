@@ -4,6 +4,8 @@
   # Sub-Scraper
 
   **A clean desktop app for pulling your Spotify & SoundCloud libraries down to local audio — fast, resiliently, and without re-downloading what you already have.**
+
+  ### 👉 New here? Read the [**Setup Guide**](SETUP.md) — install + Spotify/SoundCloud keys in ~10 minutes, no coding.
 </div>
 
 ---
@@ -39,10 +41,17 @@
 
 ## Install & run
 
+> First time? The [**Setup Guide**](SETUP.md) walks you through ffmpeg, getting
+> Spotify keys, and the SoundCloud token — step by step. The quick version:
+
 ```bash
 ./setup.sh        # creates a venv and installs requirements (Windows: setup.bat)
 ./run.sh          # launches the app   (Windows: run.bat)
 ```
+
+On first launch a built-in **wizard** collects your Spotify/SoundCloud details
+(with a one-click **Copy** for the Spotify redirect URI). You can change them
+later under **Settings**.
 
 External tools used for extraction: [`yt-dlp`](https://github.com/yt-dlp/yt-dlp)
 and [`spotdl`](https://github.com/spotDL/spotify-downloader) (installed via
