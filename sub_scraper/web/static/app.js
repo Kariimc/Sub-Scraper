@@ -361,15 +361,19 @@ async function loadConfig() {
   } catch {}
 }
 
-async function saveConfig() {
+async function saveConfig(silent) {
   const form = document.getElementById("settings-form");
   const status = document.getElementById("save-status");
 
+  // Secret fields load blank (they're masked). If left blank, send the mask
+  // placeholder so the server KEEPS the stored secret instead of wiping it.
+  const keepIfBlank = v => (v && v.trim()) ? v : "••••••••";
+
   const body = {
     spotify_client_id:     form.spotify_client_id.value,
-    spotify_client_secret: form.spotify_client_secret.value,
+    spotify_client_secret: keepIfBlank(form.spotify_client_secret.value),
     soundcloud_username:   form.soundcloud_username.value,
-    soundcloud_auth_token: form.soundcloud_auth_token.value,
+    soundcloud_auth_token: keepIfBlank(form.soundcloud_auth_token.value),
     download_path:         form.download_path.value,
     output_format:         form.output_format.value,
     audio_quality:         form.audio_quality.value,
@@ -383,13 +387,44 @@ async function saveConfig() {
       body: JSON.stringify(body),
     });
     if (r.ok) {
-      status.textContent = "✓ Saved";
-      setTimeout(() => { status.textContent = ""; }, 3000);
-    } else {
+      if (!silent) {
+        status.textContent = "✓ Saved";
+        setTimeout(() => { status.textContent = ""; }, 3000);
+      }
+    } else if (!silent) {
       status.textContent = "Save failed.";
     }
   } catch {
-    status.textContent = "Network error.";
+    if (!silent) status.textContent = "Network error.";
+  }
+}
+
+async function testConnection(source, btn) {
+  const status = document.getElementById("test-" + source);
+  // Save current form values first so the test uses what's typed right now.
+  await saveConfig(true);
+
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Testing…";
+  status.textContent = "";
+  status.className = "test-status";
+
+  try {
+    const r = await fetch("/api/config/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source }),
+    });
+    const data = await r.json();
+    status.textContent = (data.ok ? "✓ " : "✗ ") + (data.message || "");
+    status.className = "test-status " + (data.ok ? "test-ok" : "test-err");
+  } catch (e) {
+    status.textContent = "✗ Network error: " + e.message;
+    status.className = "test-status test-err";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
   }
 }
 

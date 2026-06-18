@@ -181,6 +181,26 @@ async def post_config(body: dict) -> dict:
     return {"ok": True}
 
 
+@app.post("/api/config/test")
+async def test_connection(body: dict) -> dict:
+    """Pre-flight credential check so users can confirm setup before loading."""
+    source: str = body.get("source", "spotify").lower()
+    if source not in (SPOTIFY, SOUNDCLOUD):
+        raise HTTPException(status_code=400, detail=f"Unknown source: {source!r}")
+
+    loop = asyncio.get_event_loop()
+
+    def _probe() -> "tuple[bool, str]":
+        try:
+            scraper = build_scraper(_config, source)
+            return scraper.test_credentials()
+        except Exception as exc:  # noqa: BLE001
+            return False, f"Couldn't check {source}: {exc}"
+
+    ok, message = await loop.run_in_executor(None, _probe)
+    return {"ok": ok, "message": message}
+
+
 @app.post("/api/library/load")
 async def load_library(body: dict) -> dict:
     global _library

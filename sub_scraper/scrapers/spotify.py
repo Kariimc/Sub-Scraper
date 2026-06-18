@@ -51,6 +51,25 @@ class SpotifyScraper(BaseScraper):
             self._sp = spotipy.Spotify(auth_manager=auth)
         return self._sp
 
+    def test_credentials(self) -> "tuple[bool, str]":
+        """Validate the Client ID/Secret via the client-credentials flow — this
+        confirms the keys are real without needing the one-time user login."""
+        if not (self.client_id and self.client_secret):
+            return False, "Add your Spotify Client ID and Client Secret."
+        try:
+            from spotipy.oauth2 import SpotifyClientCredentials
+            cc = SpotifyClientCredentials(
+                client_id=self.client_id, client_secret=self.client_secret
+            )
+            probe = spotipy.Spotify(auth_manager=cc)
+            probe.search(q="test", type="track", limit=1)
+            return True, "Spotify keys are valid — you'll log in once on first load."
+        except Exception as exc:  # noqa: BLE001 - surfaced to the user
+            msg = str(exc)
+            if "invalid_client" in msg.lower():
+                return False, "Spotify rejected these keys. Double-check the Client ID and Secret."
+            return False, f"Spotify check failed: {msg}"
+
     def fetch_library(self, **kwargs) -> list[Track]:
         tracks: list[Track] = []
         offset = 0

@@ -91,6 +91,14 @@ class BaseScraper(ABC):
     @abstractmethod
     def fetch_library(self, **kwargs) -> list[Track]: ...
 
+    def test_credentials(self) -> "tuple[bool, str]":
+        """Lightweight pre-flight check of the configured credentials.
+
+        Returns ``(ok, message)``. The default is a no-op success; concrete
+        scrapers override it to actually probe their provider so the setup UI
+        can confirm keys work before the user tries a full library load."""
+        return True, "No credential check available for this source."
+
     @abstractmethod
     def download_command(
         self, track: Track, output_dir: str, quality: str, fmt: str

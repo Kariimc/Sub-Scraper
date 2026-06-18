@@ -48,6 +48,40 @@ class SoundCloudScraper(BaseScraper):
             self._session = sess
         return self._session
 
+    def test_credentials(self) -> "tuple[bool, str]":
+        """Confirm we can reach SoundCloud and that the username resolves / token
+        is accepted."""
+        if not (self.username or self.auth_token):
+            return False, "Add your SoundCloud username (or a token for playlists)."
+        try:
+            client_id = self._get_client_id()
+            if not client_id:
+                return False, "Couldn't reach SoundCloud (no client_id found)."
+            if self.username:
+                resp = self.session.get(
+                    f"{_API}/resolve",
+                    params={"url": f"https://soundcloud.com/{self.username}",
+                            "client_id": client_id},
+                    timeout=15,
+                )
+                if resp.status_code == 404:
+                    return False, f"Username '{self.username}' not found on SoundCloud."
+                resp.raise_for_status()
+                return True, f"Found SoundCloud user '{self.username}'."
+            # Token-only: validate it against the authenticated /me endpoint.
+            resp = self.session.get(
+                f"{_API}/me",
+                params={"client_id": client_id},
+                headers={"Authorization": f"OAuth {self.auth_token}"},
+                timeout=15,
+            )
+            if resp.status_code in (401, 403):
+                return False, "SoundCloud token rejected — it may have expired."
+            resp.raise_for_status()
+            return True, "SoundCloud token is valid."
+        except Exception as exc:  # noqa: BLE001 - surfaced to the user
+            return False, f"SoundCloud check failed: {exc}"
+
     def _auth_args(self) -> list[str]:
         if self.auth_token:
             return ["--add-header", f"Authorization: OAuth {self.auth_token}"]

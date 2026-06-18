@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import tkinter as tk
 import webbrowser
 from tkinter import filedialog
@@ -10,7 +11,7 @@ import customtkinter as ctk
 from ..core.config import Config
 from .logo import get_ctk_image
 from .styles import (
-    BLUE, BLUE_HOVER, BORDER, CARD_ALT, FONT_BRAND, FONT_MEDIUM, FONT_MONO,
+    BLUE, BLUE_HOVER, BORDER, CARD_ALT, ERROR, FONT_BRAND, FONT_MEDIUM, FONT_MONO,
     FONT_SMALL, FONT_TITLE, HIGHLIGHT, HIGHLIGHT_HOVER, SUCCESS, TEXT_PRIMARY,
     TEXT_SECONDARY, WHITE,
 )
@@ -187,6 +188,42 @@ class SetupWizard(ctk.CTkFrame):
             anchor="w", command=lambda: webbrowser.open(_GUIDE_URL),
         ).pack(anchor="w", pady=(14, 0))
 
+    def _test_button(self, source: str) -> None:
+        """A 'Test Connection' button that confirms the just-entered credentials
+        actually work — so a new user knows setup succeeded before moving on."""
+        row = ctk.CTkFrame(self._content, fg_color="transparent")
+        row.pack(fill="x", pady=(12, 0))
+        status = ctk.CTkLabel(
+            row, text="", font=FONT_SMALL, text_color=TEXT_SECONDARY,
+            anchor="w", wraplength=380, justify="left",
+        )
+
+        def _done(ok: bool, msg: str) -> None:
+            btn.configure(state="normal", text="Test Connection")
+            status.configure(text=("✓ " if ok else "✗ ") + msg,
+                             text_color=SUCCESS if ok else ERROR)
+
+        def _worker() -> None:
+            try:
+                from ..scrapers.factory import build_scraper
+                ok, msg = build_scraper(self._config, source).test_credentials()
+            except Exception as exc:  # noqa: BLE001
+                ok, msg = False, str(exc)
+            # Marshal back onto the Tk main thread.
+            self.after(0, lambda: _done(ok, msg))
+
+        def _run() -> None:
+            btn.configure(state="disabled", text="Testing…")
+            status.configure(text="", text_color=TEXT_SECONDARY)
+            threading.Thread(target=_worker, daemon=True).start()
+
+        btn = ctk.CTkButton(
+            row, text="Test Connection", width=150, height=32,
+            fg_color=BLUE, hover_color=BLUE_HOVER, text_color=WHITE, command=_run,
+        )
+        btn.pack(side="left")
+        status.pack(side="left", padx=12)
+
     # ------------------------------------------------------------------
     # Steps
     # ------------------------------------------------------------------
@@ -208,6 +245,7 @@ class SetupWizard(ctk.CTkFrame):
         )
         self._field("Client ID", "spotify_client_id")
         self._field("Client Secret (hidden)", "spotify_client_secret", show="*")
+        self._test_button("spotify")
         self._guide_link()
 
     def _step_1(self) -> None:
@@ -230,6 +268,7 @@ class SetupWizard(ctk.CTkFrame):
         )
         self._field("Auth Token — optional (for playlists / private likes)",
                     "soundcloud_auth_token", show="*")
+        self._test_button("soundcloud")
         self._guide_link("See the full SoundCloud token walkthrough →")
 
     def _step_2(self) -> None:

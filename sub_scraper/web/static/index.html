@@ -145,6 +145,10 @@
                 <button type="button" class="btn btn-xs btn-ghost reveal-btn" onclick="toggleReveal('f-spotify-secret', this)">Show</button>
               </div>
             </div>
+            <div class="test-row">
+              <button type="button" class="btn btn-sm btn-secondary" onclick="testConnection('spotify', this)">Test Connection</button>
+              <span class="test-status" id="test-spotify"></span>
+            </div>
           </div>
 
           <div class="settings-group">
@@ -159,6 +163,10 @@
                 <input type="password" id="f-sc-token" name="soundcloud_auth_token" autocomplete="new-password" placeholder="Enter SoundCloud auth token" />
                 <button type="button" class="btn btn-xs btn-ghost reveal-btn" onclick="toggleReveal('f-sc-token', this)">Show</button>
               </div>
+            </div>
+            <div class="test-row">
+              <button type="button" class="btn btn-sm btn-secondary" onclick="testConnection('soundcloud', this)">Test Connection</button>
+              <span class="test-status" id="test-soundcloud"></span>
             </div>
           </div>
 

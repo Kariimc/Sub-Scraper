@@ -237,6 +237,11 @@ body {
 .form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 8px; }
 .save-status { font-size: 13px; color: var(--success); }
 
+.test-row { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
+.test-status { font-size: 13px; }
+.test-status.test-ok  { color: var(--success); }
+.test-status.test-err { color: var(--error); }
+
 .notice { padding: 12px 16px; border-radius: var(--radius); font-size: 13px; margin-bottom: 20px; }
 .notice--warn { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; }
 
