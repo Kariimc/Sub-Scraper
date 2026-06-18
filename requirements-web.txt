@@ -1,3 +1,9 @@
-fastapi>=0.110.0
-uvicorn[standard]>=0.27.0
-python-multipart>=0.0.9
+# Web UI extras (installed on top of requirements.txt).
+#
+# fastapi / uvicorn are intentionally left UNPINNED: spotdl (in requirements.txt)
+# pins fastapi to ">=0.103,<0.104", so requesting a newer version here makes the
+# whole install unresolvable (ResolutionImpossible). Letting the resolver choose
+# keeps it compatible with spotdl — the server only uses long-stable FastAPI APIs.
+fastapi
+uvicorn[standard]
+python-multipart

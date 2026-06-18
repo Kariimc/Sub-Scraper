@@ -1,0 +1,21 @@
+# Runtime dependencies for the hosted web server (used by the Dockerfile).
+#
+# This deliberately EXCLUDES the desktop-only libraries — customtkinter and
+# Pillow (GUI) and the optional Google Drive packages — because the web server
+# imports none of them. Dropping them makes the image build faster and lighter,
+# which matters on free hosting tiers with limited build memory/time.
+#
+# The download engine shells out to the `spotdl` and `yt-dlp` command-line tools,
+# so those must be installed even though the web code never imports them directly.
+
+spotipy>=2.23.0
+spotdl>=4.2.5
+yt-dlp>=2024.1.0
+requests>=2.31.0
+aiohttp>=3.9.0
+
+# Web server. Unpinned on purpose so they resolve against spotdl's fastapi
+# (>=0.103,<0.104) constraint instead of conflicting with it.
+fastapi
+uvicorn[standard]
+python-multipart

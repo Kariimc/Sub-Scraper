@@ -7,9 +7,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python deps first (layer-caches until requirements change)
-COPY requirements.txt requirements-web.txt ./
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-web.txt
+# Install Python deps first (layer-caches until requirements change).
+# Uses the slim server requirements — no desktop GUI / Google Drive packages.
+COPY requirements-server.txt ./
+RUN pip install --no-cache-dir -r requirements-server.txt
 
 # Copy source
 COPY . .
