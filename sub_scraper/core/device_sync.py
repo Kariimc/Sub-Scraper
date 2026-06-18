@@ -1,6 +1,7 @@
 """Portable audio device sync — detect removable drives and copy a track list to them.
 
-Supports macOS (/Volumes), Linux (/media/$USER, /mnt), and Windows (wmic DriveType=2).
+Supports macOS (/Volumes), Linux (/media/$USER, /run/media/$USER, mountpoints
+under /media and /mnt), and Windows (wmic DriveType=2).
 Conversion via ffmpeg subprocess is optional; pass ``convert_to="mp3"`` or
 ``convert_to="flac"`` to transcode on the fly.
 """
@@ -56,9 +57,11 @@ def detect_devices() -> list[DeviceInfo]:
 
     * **macOS** – scans ``/Volumes``, skips the boot volume (*Macintosh HD*)
       and any hidden (dot-prefixed) volumes.
-    * **Linux** – scans ``/media/$USER`` (udisks auto-mount) and ``/mnt``
-      (manual mounts).  Skips entries that are not directories or are empty
-      mount-stubs (i.e. contain no files/subdirectories beyond ``.``).
+    * **Linux** – scans the udisks2 auto-mount roots (``/media/$USER``,
+      ``/run/media/$USER`` — the latter covers Fedora/Arch/SteamOS), plus
+      mountpoints directly under ``/media`` and ``/mnt``.  Only real
+      *mountpoints* count, so system bind-mounts and ordinary sub-directories
+      are never offered as bogus targets; empty mounts are skipped too.
     * **Windows** – uses ``wmic logicaldisk`` to find drives with
       ``DriveType=2`` (removable) and maps them to ``Path`` objects.
     * **Fallback** – logs a warning and returns an empty list.
@@ -102,23 +105,41 @@ def _detect_macos() -> list[DeviceInfo]:
 def _detect_linux() -> list[DeviceInfo]:
     candidates: list[Path] = []
     user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
-    media_user = Path(f"/media/{user}") if user else None
-    if media_user and media_user.is_dir():
-        candidates += list(media_user.iterdir())
-    mnt = Path("/mnt")
-    if mnt.is_dir():
-        candidates += list(mnt.iterdir())
+    # Where desktops auto-mount removable media (USB sticks, SD cards, DAPs):
+    #   /media/<user>      — Debian/Ubuntu udisks2
+    #   /run/media/<user>  — Fedora/Arch/SteamOS (Steam Deck) udisks2
+    #   /media/*           — some setups mount directly here
+    roots: list[Path] = []
+    if user:
+        roots += [Path(f"/media/{user}"), Path(f"/run/media/{user}")]
+    roots += [Path("/media"), Path("/mnt")]
+    for root in roots:
+        if root.is_dir():
+            try:
+                candidates += list(root.iterdir())
+            except PermissionError:
+                continue
 
     results: list[DeviceInfo] = []
+    seen: set[str] = set()
     for entry in candidates:
-        if not entry.is_dir():
+        rp = str(entry)
+        if rp in seen or not entry.is_dir():
             continue
-        # Skip empty mount stubs — they exist but have nothing mounted.
+        seen.add(rp)
+        # A real removable device is an actual mountpoint. This excludes system
+        # bind mounts and ordinary sub-directories (e.g. /mnt/skills) that would
+        # otherwise be offered as bogus sync targets.
         try:
-            children = list(entry.iterdir())
-        except PermissionError:
+            if not os.path.ismount(entry):
+                continue
+        except OSError:
             continue
-        if not children:
+        # Skip empty mounts — nothing actually mounted there.
+        try:
+            if not any(True for _ in entry.iterdir()):
+                continue
+        except PermissionError:
             continue
         info = _stat_device(entry)
         if info is not None:
