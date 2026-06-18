@@ -76,16 +76,20 @@ from the included `Dockerfile` and read your `$PORT` automatically.
 
 ### Keep it auto-updating on every push
 
-Both platforms can redeploy automatically whenever you push, so your hosted link
-always runs the latest version:
+Both platforms redeploy automatically whenever you push, so your hosted link
+always runs the latest version — nothing to configure:
 
+- **Render:** `render.yaml` sets `autoDeploy: true`, so Render rebuilds on every
+  push to the connected branch. (An instance deployed *before* this setting was
+  added needs **one** manual redeploy to adopt it — service → **Manual Deploy →
+  Deploy latest commit** — after that it's automatic.)
 - **Railway:** automatic once the repo is connected — nothing else to do.
-- **Render:** copy your service's **Deploy Hook** (service → Settings → Deploy
-  Hook), then in GitHub add it as a secret: repo → **Settings → Secrets and
-  variables → Actions → New repository secret**, name it **`RENDER_DEPLOY_HOOK`**.
-  The included `.github/workflows/ci.yml` runs the tests on every push and, when
-  that secret is present, pings the hook to deploy. No secret = it just runs the
-  tests and skips deploying.
+
+> Prefer to drive Render deploys from CI instead? Copy your service's **Deploy
+> Hook** (service → Settings → Deploy Hook) and add it to GitHub as a secret
+> named **`RENDER_DEPLOY_HOOK`** (repo → Settings → Secrets and variables →
+> Actions). The included `.github/workflows/ci.yml` pings it after tests pass.
+> With `autoDeploy: true` this is entirely optional.
 
 ---
 

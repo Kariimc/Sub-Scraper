@@ -8,7 +8,9 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     healthCheckPath: /api/health
-    autoDeploy: false
+    # Auto-rebuild whenever the connected branch is pushed, so the live link
+    # always runs the latest version (no deploy hook needed).
+    autoDeploy: true
     envVars:
       # Render injects $PORT automatically; web_run.py honours it.
       - key: PYTHONUNBUFFERED
