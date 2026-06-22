@@ -7,6 +7,7 @@ let _tracks = [];
 let _sse = null;
 let _demoMode = false; // true while the no-credentials sample library is shown
 let _envLocked = new Set(); // field names pre-configured via server env vars
+let _autoLoaded = false; // guard: auto-open the library only once per page load
 let _dlStats = { done: 0, failed: 0, queue: 0, active: 0 };
 let _activeDl = {}; // track_id -> {name, fraction, speed, eta}
 
@@ -429,10 +430,25 @@ async function loadConfig() {
       }
     }
 
-    // Show first-run notice if no credentials
-    const hasCredentials = cfg.spotify_client_id || cfg.soundcloud_username;
+    // Work out what we're authenticated for. client_id / username aren't secrets
+    // so they come back in the clear; env-locked fields count even if masked.
+    const locked = cfg.env_locked || [];
+    const hasSpotify = !!cfg.spotify_client_id || locked.includes("spotify_client_id");
+    const hasSoundcloud = !!cfg.soundcloud_username
+      || locked.includes("soundcloud_username") || locked.includes("soundcloud_auth_token");
+    const hasCredentials = hasSpotify || hasSoundcloud;
+
+    // Show first-run notice only when nothing is configured.
     const notice = document.getElementById("first-run-notice");
-    if (notice) notice.classList.toggle("hidden", !!hasCredentials);
+    if (notice) notice.classList.toggle("hidden", hasCredentials);
+
+    // Baked-in credentials → open straight into the library, already "logged
+    // in": no Load button, no source picking, no key entry. Runs once.
+    if (hasCredentials && !_autoLoaded && !_demoMode) {
+      _autoLoaded = true;
+      setSource(hasSpotify ? "spotify" : "soundcloud");
+      loadLibrary();
+    }
   } catch {}
 }
 
