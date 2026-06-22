@@ -116,6 +116,36 @@ walkthrough (and how to let friends try it on your local network in 30 seconds).
 > idle — great for trying it out and browsing libraries. For keeping a big music
 > collection (and the **Device Sync** feature), run the desktop app.
 
+### Stay logged in — bake your keys in once
+
+Don't want to type credentials into Settings every time (or ever)? Set them once
+and the app opens **already logged in** and stays that way — no wizard, no key
+entry, surviving restarts.
+
+**Local (desktop or `web_run.py`):** copy [`.env.example`](.env.example) to `.env`
+and fill in your keys:
+
+```bash
+cp .env.example .env      # then edit .env and paste your keys
+```
+
+The app auto-loads `.env` on startup. (You can also place it at
+`~/.sub_scraper/.env` so it lives with your config, independent of the project
+folder.)
+
+**Hosted (Render / Railway):** add the same names under the service's
+**Environment** section in the dashboard — these persist across the free tier's
+restarts, unlike anything typed into the Settings page:
+
+```
+SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SOUNDCLOUD_USERNAME, SOUNDCLOUD_AUTH_TOKEN
+```
+
+Either way, any credential supplied this way is **locked** in the Settings UI
+(shown disabled with a "locked" badge) so it can't be accidentally cleared, and a
+real host environment variable always wins over a `.env` file. `.env` itself is
+gitignored and never committed.
+
 ## Download-engine architecture
 
 The engine (`sub_scraper/core/`) is intentionally modular:

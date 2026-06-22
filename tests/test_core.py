@@ -473,6 +473,56 @@ def _t_config():
     assert Config().autosync is not Config().autosync
 
 
+@check("config: environment variables override stored credentials + report locked")
+def _t_config_env_override():
+    import os
+
+    fields = {
+        "SPOTIFY_CLIENT_ID": "spotify_client_id",
+        "SPOTIFY_CLIENT_SECRET": "spotify_client_secret",
+        "SOUNDCLOUD_USERNAME": "soundcloud_username",
+        "SOUNDCLOUD_AUTH_TOKEN": "soundcloud_auth_token",
+    }
+    saved = {env: os.environ.get(env) for env in fields}
+    try:
+        for env in fields:
+            os.environ[env] = f"env-{env.lower()}"
+        cfg = Config.load()
+        for env, attr in fields.items():
+            assert getattr(cfg, attr) == f"env-{env.lower()}", attr
+        # Every env-supplied field is reported as locked so the UI/server can
+        # protect it from being overwritten or cleared.
+        assert Config.env_locked_fields() == set(fields.values())
+    finally:
+        for env, prev in saved.items():
+            if prev is None:
+                os.environ.pop(env, None)
+            else:
+                os.environ[env] = prev
+
+
+@check("config: .env parser handles comments, blanks, quotes")
+def _t_config_dotenv_parse():
+    from sub_scraper.core.config import _parse_env_file
+
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / ".env"
+        p.write_text(
+            "# a comment\n"
+            "\n"
+            "SPOTIFY_CLIENT_ID=plain_id\n"
+            'SPOTIFY_CLIENT_SECRET="quoted secret"\n'
+            "SOUNDCLOUD_USERNAME = spaced_user \n"
+            "MALFORMED_NO_EQUALS\n"
+        )
+        parsed = _parse_env_file(p)
+    assert parsed["SPOTIFY_CLIENT_ID"] == "plain_id", parsed
+    assert parsed["SPOTIFY_CLIENT_SECRET"] == "quoted secret", parsed
+    assert parsed["SOUNDCLOUD_USERNAME"] == "spaced_user", parsed
+    assert "MALFORMED_NO_EQUALS" not in parsed, parsed
+    assert _parse_env_file(Path(d) / "does-not-exist.env") == {}
+
+
 # ---------------------------------------------------------------------------
 # Progress parsing (pure + end-to-end through the engine)
 # ---------------------------------------------------------------------------
