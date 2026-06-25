@@ -162,21 +162,33 @@
               <ol>
                 <li>Open the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Spotify Developer Dashboard</a> and log in with your normal Spotify account.</li>
                 <li>Click <strong>Create app</strong>. Give it any name (e.g. "Sub-Scraper") and description.</li>
-                <li>In the <strong>Redirect URIs</strong> box, paste this <em>exactly</em>, then click <strong>Add</strong>:
-                  <span class="copy-chip">
-                    <code>http://127.0.0.1:8888/callback</code>
-                    <button type="button" class="btn btn-xs btn-ghost" onclick="copyText('http://127.0.0.1:8888/callback', this)">Copy</button>
-                  </span>
-                  <span class="field-help-hint">Use <strong>127.0.0.1</strong> (not "localhost"), and keep the <code>http://</code> and <code>/callback</code>. This is the #1 thing people get wrong.</span>
-                </li>
+                <li>When it asks for a <strong>Redirect URI</strong>, use the one shown in <em>"Connect your account"</em> just below — it has a Copy button.</li>
                 <li>Tick <strong>Web API</strong>, accept the terms, and click <strong>Save</strong>.</li>
                 <li>Open the app's <strong>Settings</strong> (top-right), then copy the <strong>Client ID</strong> and <strong>Client Secret</strong> into the boxes above.</li>
               </ol>
-              <p class="field-help-hint">⚠️ Spotify's login runs on your own computer, so load your Spotify library from the <strong>desktop app</strong> or the <strong>local</strong> web version (<code>web_run.bat</code> → localhost:8080). The hosted link works for SoundCloud, but can't finish the Spotify login.</p>
             </details>
             <div class="test-row">
               <button type="button" class="btn btn-sm btn-secondary" onclick="testConnection('spotify', this)">Test Connection</button>
               <span class="test-status" id="test-spotify"></span>
+            </div>
+
+            <div class="connect-block" id="spotify-connect-block">
+              <p class="connect-title"><strong>Connect your Spotify account</strong> <span class="connect-state" id="spotify-connect-state"></span></p>
+              <p class="field-help-hint">A one-time login so this app can read your liked songs and playlists.</p>
+              <ol class="connect-steps">
+                <li>In your <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Spotify app's settings</a>, add this exact <strong>Redirect URI</strong> and Save:
+                  <span class="copy-chip">
+                    <code id="spotify-redirect-uri">loading…</code>
+                    <button type="button" class="btn btn-xs btn-ghost" onclick="copyRedirectUri(this)">Copy</button>
+                  </span>
+                </li>
+                <li>Click <strong>Connect Spotify</strong>, log in, and approve.</li>
+              </ol>
+              <div class="test-row">
+                <button type="button" class="btn btn-sm btn-primary" onclick="connectSpotify()">Connect Spotify</button>
+                <button type="button" class="btn btn-sm btn-ghost hidden" id="spotify-disconnect-btn" onclick="disconnectSpotify()">Disconnect</button>
+                <span class="test-status" id="spotify-connect-status"></span>
+              </div>
             </div>
           </div>
 

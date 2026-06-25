@@ -10,8 +10,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Generator
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from sub_scraper.core.config import Config
@@ -19,6 +19,16 @@ from sub_scraper.core.download_manager import DownloadJob, DownloadManager
 from sub_scraper.core.library_index import DownloadIndex
 from sub_scraper.scrapers.base import DownloadStatus, Track
 from sub_scraper.scrapers.factory import SOUNDCLOUD, SPOTIFY, build_scraper
+from sub_scraper.scrapers.spotify import (
+    build_oauth as _spotify_build_oauth,
+    clear_cached_token as _spotify_clear_token,
+    has_cached_token as _spotify_has_token,
+)
+
+# Spotify's login can't pop a desktop browser here, and its OAuth redirect must
+# return to this server — signal the scraper to run headless and use the token
+# the /api/spotify/callback route caches.
+os.environ.setdefault("SUBSCRAPER_NO_BROWSER", "1")
 
 # ---------------------------------------------------------------------------
 # Module-level singletons
@@ -122,6 +132,29 @@ def _get_or_init_manager() -> DownloadManager:
         _manager.configure_index(_index)
         _manager.start()
     return _manager
+
+
+# --- Spotify OAuth (web login flow) ----------------------------------------
+
+_SPOTIFY_CALLBACK_PATH = "/api/spotify/callback"
+
+
+def _public_base_url(request: Request) -> str:
+    """Best-effort public base URL (scheme://host) for building the OAuth
+    redirect. Honours a platform-provided URL and proxy headers so it stays
+    correct behind Render/Railway's TLS-terminating proxy."""
+    env_url = os.environ.get("SUBSCRAPER_PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL")
+    if env_url:
+        return env_url.rstrip("/")
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = (request.headers.get("x-forwarded-host")
+            or request.headers.get("host")
+            or request.url.netloc)
+    return f"{proto}://{host}"
+
+
+def _spotify_redirect_uri(request: Request) -> str:
+    return _public_base_url(request) + _SPOTIFY_CALLBACK_PATH
 
 
 # IDs in the no-setup demo library all carry this prefix so the download path
@@ -246,6 +279,60 @@ async def test_connection(body: dict) -> dict:
     return {"ok": ok, "message": message}
 
 
+@app.get("/api/spotify/status")
+async def spotify_status(request: Request) -> dict:
+    """Whether the one-time Spotify login is done here, plus the exact redirect
+    URI the user must register in their Spotify app for it to work."""
+    return {
+        "has_keys": bool(_config.spotify_client_id and _config.spotify_client_secret),
+        "connected": _spotify_has_token(_config.spotify_client_id, _config.spotify_client_secret),
+        "redirect_uri": _spotify_redirect_uri(request),
+    }
+
+
+@app.get("/api/spotify/login")
+async def spotify_login(request: Request):
+    """Start Spotify's login by redirecting the browser to Spotify's consent
+    page; the user returns to the callback below with an authorization code."""
+    if not (_config.spotify_client_id and _config.spotify_client_secret):
+        raise HTTPException(status_code=400,
+                            detail="Add your Spotify Client ID and Secret in Settings first.")
+    oauth = _spotify_build_oauth(
+        _config.spotify_client_id, _config.spotify_client_secret,
+        redirect_uri=_spotify_redirect_uri(request), open_browser=False,
+    )
+    return RedirectResponse(url=oauth.get_authorize_url())
+
+
+@app.get("/api/spotify/callback")
+async def spotify_callback(request: Request, code: str = "", error: str = ""):
+    """Spotify redirects here after consent; exchange the code for a token,
+    cache it for the scraper, then bounce back into the app."""
+    if error or not code:
+        return RedirectResponse(url="/?spotify=denied")
+    oauth = _spotify_build_oauth(
+        _config.spotify_client_id, _config.spotify_client_secret,
+        redirect_uri=_spotify_redirect_uri(request), open_browser=False,
+    )
+    loop = asyncio.get_event_loop()
+
+    def _exchange() -> bool:
+        try:
+            oauth.get_access_token(code, as_dict=False, check_cache=False)
+            return True
+        except Exception:
+            return False
+
+    ok = await loop.run_in_executor(None, _exchange)
+    return RedirectResponse(url="/?spotify=" + ("connected" if ok else "error"))
+
+
+@app.post("/api/spotify/disconnect")
+async def spotify_disconnect() -> dict:
+    _spotify_clear_token()
+    return {"ok": True}
+
+
 @app.post("/api/library/load")
 async def load_library(body: dict) -> dict:
     global _library
@@ -260,6 +347,12 @@ async def load_library(body: dict) -> dict:
             status_code=400,
             detail="Spotify isn't set up yet. Open Settings and add your Spotify "
                    "Client ID and Client Secret, then Save.",
+        )
+    if source == SPOTIFY and not _spotify_has_token(_config.spotify_client_id, _config.spotify_client_secret):
+        raise HTTPException(
+            status_code=400,
+            detail="Connect your Spotify account first — open Settings and click "
+                   "“Connect Spotify”. Spotify needs a one-time login in your browser.",
         )
     if source == SOUNDCLOUD and not (_config.soundcloud_username or _config.soundcloud_auth_token):
         raise HTTPException(

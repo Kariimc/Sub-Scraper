@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -8,6 +9,48 @@ from .base import BaseScraper, BuildCmd, Track, ytdlp_perf_args_str
 
 _SCOPE = "user-library-read playlist-read-private"
 _CACHE = str(Path.home() / ".sub_scraper" / ".spotify_cache")
+
+# Desktop logs in via a browser pop-up that redirects to a tiny local server.
+# The web server can't pop a browser and the redirect must return to the server
+# instead, so it overrides both via these env vars (see web/server.py).
+_DEFAULT_REDIRECT_URI = "http://127.0.0.1:8888/callback"
+
+
+def build_oauth(client_id: str, client_secret: str,
+                redirect_uri: str = _DEFAULT_REDIRECT_URI,
+                open_browser: bool = True) -> SpotifyOAuth:
+    """Construct a SpotifyOAuth sharing the app's scope and on-disk token cache.
+
+    Shared by the desktop pop-up flow and the web login/callback routes so a
+    token obtained either way lands in the same cache and is reused afterwards.
+    """
+    return SpotifyOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        scope=_SCOPE,
+        cache_path=_CACHE,
+        open_browser=open_browser,
+    )
+
+
+def has_cached_token(client_id: str, client_secret: str) -> bool:
+    """True if a usable Spotify token is already cached — i.e. the user has
+    completed the login at least once and the refresh token still works."""
+    if not (client_id and client_secret):
+        return False
+    try:
+        return build_oauth(client_id, client_secret, open_browser=False).get_cached_token() is not None
+    except Exception:
+        return False
+
+
+def clear_cached_token() -> None:
+    """Forget the cached Spotify token (used by 'Disconnect')."""
+    try:
+        os.remove(_CACHE)
+    except OSError:
+        pass
 
 
 def _thumb_url(images: list[dict]) -> str:
@@ -40,13 +83,14 @@ class SpotifyScraper(BaseScraper):
     @property
     def sp(self) -> spotipy.Spotify:
         if self._sp is None:
-            auth = SpotifyOAuth(
-                client_id=self.client_id,
-                client_secret=self.client_secret,
-                redirect_uri="http://127.0.0.1:8888/callback",
-                scope=_SCOPE,
-                cache_path=_CACHE,
-                open_browser=True,
+            # The web server sets these so the same scraper runs headless: no
+            # browser pop-up, and the redirect points back at the server. On
+            # desktop they're unset, so the original loopback pop-up flow runs.
+            redirect_uri = os.environ.get("SUBSCRAPER_REDIRECT_URI", _DEFAULT_REDIRECT_URI)
+            open_browser = os.environ.get("SUBSCRAPER_NO_BROWSER") != "1"
+            auth = build_oauth(
+                self.client_id, self.client_secret,
+                redirect_uri=redirect_uri, open_browser=open_browser,
             )
             self._sp = spotipy.Spotify(auth_manager=auth)
         return self._sp

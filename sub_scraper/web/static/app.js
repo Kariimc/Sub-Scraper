@@ -17,6 +17,7 @@ document.addEventListener("DOMContentLoaded", () => {
   checkHealth();
   connectSSE();
   showSection("library");
+  handleSpotifyReturn();
 });
 
 // ===== Health =====
@@ -449,6 +450,9 @@ async function loadConfig() {
       setSource(hasSpotify ? "spotify" : "soundcloud");
       loadLibrary();
     }
+
+    // Populate the Spotify "Connect account" panel (redirect URI + status).
+    refreshSpotifyConnect();
   } catch {}
 }
 
@@ -519,6 +523,70 @@ async function testConnection(source, btn) {
     btn.disabled = false;
     btn.textContent = orig;
   }
+}
+
+// ===== Spotify account connection (web OAuth) =====
+async function refreshSpotifyConnect() {
+  try {
+    const r = await fetch("/api/spotify/status");
+    if (!r.ok) return;
+    const s = await r.json();
+    const uriEl = document.getElementById("spotify-redirect-uri");
+    if (uriEl && s.redirect_uri) uriEl.textContent = s.redirect_uri;
+    const stateEl = document.getElementById("spotify-connect-state");
+    const disBtn = document.getElementById("spotify-disconnect-btn");
+    if (s.connected) {
+      if (stateEl) { stateEl.textContent = "✓ Connected"; stateEl.className = "connect-state test-ok"; }
+      if (disBtn) disBtn.classList.remove("hidden");
+    } else {
+      if (stateEl) { stateEl.textContent = "Not connected"; stateEl.className = "connect-state"; }
+      if (disBtn) disBtn.classList.add("hidden");
+    }
+  } catch {}
+}
+
+async function connectSpotify() {
+  // Persist any typed keys first so the server has them for the OAuth handshake.
+  const status = document.getElementById("spotify-connect-status");
+  if (status) { status.textContent = "Saving keys…"; status.className = "test-status"; }
+  await saveConfig(true);
+  window.location.href = "/api/spotify/login";
+}
+
+async function disconnectSpotify() {
+  try { await fetch("/api/spotify/disconnect", { method: "POST" }); } catch {}
+  const status = document.getElementById("spotify-connect-status");
+  if (status) { status.textContent = "Disconnected."; status.className = "test-status"; }
+  refreshSpotifyConnect();
+}
+
+function copyRedirectUri(btn) {
+  const el = document.getElementById("spotify-redirect-uri");
+  if (el) copyText(el.textContent, btn);
+}
+
+// Handle the return trip from Spotify's consent page: /?spotify=connected|denied|error
+function handleSpotifyReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const outcome = params.get("spotify");
+  if (!outcome) return;
+  history.replaceState(null, "", window.location.pathname); // don't re-trigger on refresh
+  if (outcome === "connected") {
+    _autoLoaded = true; // we load explicitly below; stop loadConfig() racing us
+    setSource("spotify");
+    showSection("library");
+    loadLibrary();
+  } else {
+    showSection("settings");
+    const status = document.getElementById("spotify-connect-status");
+    if (status) {
+      status.textContent = outcome === "denied"
+        ? "✗ Login was cancelled — click Connect Spotify to try again."
+        : "✗ Login failed — check your keys and that the redirect URI above is added in Spotify, then retry.";
+      status.className = "test-status test-err";
+    }
+  }
+  refreshSpotifyConnect();
 }
 
 // ===== Helpers =====
