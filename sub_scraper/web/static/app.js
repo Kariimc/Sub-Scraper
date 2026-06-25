@@ -580,9 +580,12 @@ function handleSpotifyReturn() {
     showSection("settings");
     const status = document.getElementById("spotify-connect-status");
     if (status) {
-      status.textContent = outcome === "denied"
-        ? "✗ Login was cancelled — click Connect Spotify to try again."
-        : "✗ Login failed — check your keys and that the redirect URI above is added in Spotify, then retry.";
+      status.textContent =
+        outcome === "denied"
+          ? "✗ Login was cancelled — click Connect Spotify to try again."
+          : outcome === "nokeys"
+          ? "✗ Add your Client ID and Secret above and Save first, then click Connect Spotify."
+          : "✗ Login failed — check your keys and that the redirect URI above is added in Spotify, then retry.";
       status.className = "test-status test-err";
     }
   }

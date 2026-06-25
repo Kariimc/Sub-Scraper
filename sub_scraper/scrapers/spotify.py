@@ -24,6 +24,12 @@ def build_oauth(client_id: str, client_secret: str,
     Shared by the desktop pop-up flow and the web login/callback routes so a
     token obtained either way lands in the same cache and is reused afterwards.
     """
+    # Make sure the cache directory exists, or the token silently fails to save
+    # and the app keeps thinking the user never connected.
+    try:
+        Path(_CACHE).parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
     return SpotifyOAuth(
         client_id=client_id,
         client_secret=client_secret,

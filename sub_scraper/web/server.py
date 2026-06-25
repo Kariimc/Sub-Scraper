@@ -140,17 +140,27 @@ _SPOTIFY_CALLBACK_PATH = "/api/spotify/callback"
 
 
 def _public_base_url(request: Request) -> str:
-    """Best-effort public base URL (scheme://host) for building the OAuth
-    redirect. Honours a platform-provided URL and proxy headers so it stays
-    correct behind Render/Railway's TLS-terminating proxy."""
+    """Public base URL (scheme://host) for the OAuth redirect.
+
+    This value must be byte-for-byte identical at login time, at callback time,
+    and in the URI shown to the user to register in Spotify — otherwise Spotify
+    rejects the exchange. So prefer a fixed platform URL, then proxy headers,
+    and force https for any non-local host (Spotify only allows http on
+    loopback, and a TLS-terminating proxy reports the inner request as http)."""
     env_url = os.environ.get("SUBSCRAPER_PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL")
     if env_url:
         return env_url.rstrip("/")
-    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    # Proxy headers can be comma-separated lists ("client, proxy"); take the first.
     host = (request.headers.get("x-forwarded-host")
             or request.headers.get("host")
-            or request.url.netloc)
-    return f"{proto}://{host}"
+            or request.url.netloc or "localhost")
+    host = host.split(",")[0].strip()
+    proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "http")
+    proto = proto.split(",")[0].strip()
+    # Spotify only permits http for loopback; anything else must be https.
+    if host.split(":")[0] not in ("localhost", "127.0.0.1", "[::1]"):
+        proto = "https"
+    return f"{proto}://{host}".rstrip("/")
 
 
 def _spotify_redirect_uri(request: Request) -> str:
@@ -293,33 +303,44 @@ async def spotify_status(request: Request) -> dict:
 @app.get("/api/spotify/login")
 async def spotify_login(request: Request):
     """Start Spotify's login by redirecting the browser to Spotify's consent
-    page; the user returns to the callback below with an authorization code."""
+    page; the user returns to the callback below with an authorization code.
+
+    Always bounces back into the app (never a raw error page) so the user can't
+    get stranded outside Sub-Scraper."""
     if not (_config.spotify_client_id and _config.spotify_client_secret):
-        raise HTTPException(status_code=400,
-                            detail="Add your Spotify Client ID and Secret in Settings first.")
-    oauth = _spotify_build_oauth(
-        _config.spotify_client_id, _config.spotify_client_secret,
-        redirect_uri=_spotify_redirect_uri(request), open_browser=False,
-    )
-    return RedirectResponse(url=oauth.get_authorize_url())
+        return RedirectResponse(url="/?spotify=nokeys")
+    try:
+        oauth = _spotify_build_oauth(
+            _config.spotify_client_id, _config.spotify_client_secret,
+            redirect_uri=_spotify_redirect_uri(request), open_browser=False,
+        )
+        return RedirectResponse(url=oauth.get_authorize_url())
+    except Exception:
+        return RedirectResponse(url="/?spotify=error")
 
 
 @app.get("/api/spotify/callback")
 async def spotify_callback(request: Request, code: str = "", error: str = ""):
-    """Spotify redirects here after consent; exchange the code for a token,
-    cache it for the scraper, then bounce back into the app."""
+    """Spotify redirects here after consent. Exchange the code for a token,
+    confirm it actually cached, then bounce back into the app.
+
+    Every path returns a redirect to "/" so the user always lands back in
+    Sub-Scraper — success, denial, or unexpected failure alike."""
     if error or not code:
         return RedirectResponse(url="/?spotify=denied")
-    oauth = _spotify_build_oauth(
-        _config.spotify_client_id, _config.spotify_client_secret,
-        redirect_uri=_spotify_redirect_uri(request), open_browser=False,
-    )
+
     loop = asyncio.get_event_loop()
 
     def _exchange() -> bool:
         try:
+            oauth = _spotify_build_oauth(
+                _config.spotify_client_id, _config.spotify_client_secret,
+                redirect_uri=_spotify_redirect_uri(request), open_browser=False,
+            )
             oauth.get_access_token(code, as_dict=False, check_cache=False)
-            return True
+            # Confirm the token genuinely persisted — a failed cache write would
+            # otherwise look like success and trap the user in a connect loop.
+            return _spotify_has_token(_config.spotify_client_id, _config.spotify_client_secret)
         except Exception:
             return False
 
