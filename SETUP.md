@@ -166,6 +166,9 @@ to grab it. (Do this in a **desktop web browser**, logged into SoundCloud.)
 3. Find the **cookies**:
    - **Chrome/Edge/Brave:** click the **Application** tab → on the left under
      **Storage → Cookies**, click **`https://soundcloud.com`**.
+     > 💡 **Don't see an "Application" tab?** The panel is too narrow to show all
+     > the tabs — click the **`»`** at the right end of the tab row and pick
+     > **Application** from the little menu. (Widening the panel works too.)
    - **Firefox:** click the **Storage** tab → **Cookies** → `https://soundcloud.com`.
 4. In the list, find the row named **`oauth_token`**.
 5. **Double-click its Value and copy it.** It looks like

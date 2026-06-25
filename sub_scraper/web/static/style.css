@@ -250,6 +250,20 @@ body {
 .lock-badge { font-size: 10px; font-weight: 600; margin-left: 6px; padding: 1px 5px; border-radius: 4px; background: #e0e7ef; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; vertical-align: middle; }
 .form-row input:disabled { background: #f4f7fc; color: var(--text-muted); cursor: not-allowed; border-style: dashed; }
 
+/* Collapsible "how do I get this?" help under a settings field */
+.field-help { grid-column: 1 / -1; margin-top: 2px; font-size: 12.5px; color: var(--text-muted); }
+.field-help > summary { cursor: pointer; color: var(--blue); font-weight: 500; list-style: none; user-select: none; width: fit-content; }
+.field-help > summary::-webkit-details-marker { display: none; }
+.field-help > summary::before { content: "▸ "; }
+.field-help[open] > summary::before { content: "▾ "; }
+.field-help-intro { margin: 8px 0 4px; }
+.field-help ol { margin: 6px 0 4px; padding-left: 20px; line-height: 1.55; }
+.field-help li { margin-bottom: 5px; }
+.field-help-hint { display: block; margin-top: 4px; font-size: 11.5px; opacity: .85; }
+.field-help kbd { background: var(--card-alt); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; font-size: 11px; font-family: inherit; }
+.field-help code { background: var(--card-alt); border-radius: 4px; padding: 1px 5px; font-size: 11.5px; }
+.field-help a { color: var(--blue); font-weight: 500; }
+
 /* SPINNER */
 .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4); border-top-color: var(--white); border-radius: 50%; animation: spin .7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

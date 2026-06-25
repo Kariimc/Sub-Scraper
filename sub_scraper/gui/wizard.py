@@ -254,27 +254,40 @@ class SetupWizard(ctk.CTkFrame):
         self._guide_link()
 
     def _step_1(self) -> None:
-        self._heading("Step 2 — SoundCloud", "Optional — skip if you only use Spotify")
+        self._heading("Step 2 — SoundCloud", "Optional — skip this if you only use Spotify")
 
         self._note(
-            "For your PUBLIC liked songs, just enter your username — the part after "
-            "soundcloud.com/ in your profile URL.\n"
-            "Example:  soundcloud.com/john-doe  →  type  john-doe"
+            "Just want your liked songs? Type your username and you're done.\n"
+            "It's the part after  soundcloud.com/  in your profile link.\n"
+            "Example:   soundcloud.com/john-doe   →   type   john-doe"
         )
         self._field("SoundCloud Username", "soundcloud_username")
 
         self._small_note(
-            "Want PLAYLISTS or PRIVATE likes? Add a token (a key your browser "
-            "already has). While logged in at soundcloud.com:\n"
-            "1. Press F12 to open developer tools.\n"
-            "2. Open  Application (Firefox: Storage) → Cookies → https://soundcloud.com.\n"
-            "3. Find  oauth_token, copy its value (looks like 2-123456-7890-AbCd…),\n"
-            "4. Paste it below."
+            "Everything below is ONLY needed for playlists or private likes. "
+            "Otherwise leave the token empty and click  Next →."
         )
-        self._field("Auth Token — optional (for playlists / private likes)",
+        self._link_btn("Open SoundCloud (log in first) →", "https://soundcloud.com")
+        self._note(
+            "Copy your token — about a minute:\n\n"
+            "1.  On the SoundCloud page (logged in), press the  F12  key.\n"
+            "      A panel opens at the side or bottom — that's normal.\n"
+            "2.  Click the  Application  tab at the top of that panel.\n"
+            "      •  Can't see it? Click the  »  at the end of the tabs and pick it.\n"
+            "      •  On Firefox, this tab is called  Storage  instead.\n"
+            "3.  On the left: click  Cookies, then  https://soundcloud.com  under it.\n"
+            "4.  In the list, find the row named  oauth_token.\n"
+            "5.  Double-click its value, copy it (Ctrl+C), and paste it below.\n"
+            "      It looks like   2-123456-7890123-AbCdEf…"
+        )
+        self._field("Auth Token — only for playlists / private likes",
                     "soundcloud_auth_token", show="*")
         self._test_button("soundcloud")
-        self._guide_link("See the full SoundCloud token walkthrough →")
+        self._small_note(
+            "This token can expire (for example if you log out of SoundCloud). If "
+            "playlists stop loading later, just grab a fresh one the same way."
+        )
+        self._guide_link("Stuck? Open the full step-by-step guide →")
 
     def _step_2(self) -> None:
         self._heading("Step 3 — Output", "Where should your music be saved?")

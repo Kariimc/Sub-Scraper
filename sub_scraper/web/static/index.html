@@ -173,6 +173,21 @@
                 <input type="password" id="f-sc-token" name="soundcloud_auth_token" autocomplete="new-password" placeholder="Enter SoundCloud auth token" />
                 <button type="button" class="btn btn-xs btn-ghost reveal-btn" onclick="toggleReveal('f-sc-token', this)">Show</button>
               </div>
+              <details class="field-help">
+                <summary>How do I get this token?</summary>
+                <p class="field-help-intro">Only needed for <strong>playlists</strong> or <strong>private likes</strong> — leave it blank otherwise. Takes about a minute:</p>
+                <ol>
+                  <li>Open <a href="https://soundcloud.com" target="_blank" rel="noopener">soundcloud.com</a> and make sure you're <strong>logged in</strong>.</li>
+                  <li>Press <kbd>F12</kbd>. A panel opens at the side or bottom — that's normal.</li>
+                  <li>Click the <strong>Application</strong> tab at the top of that panel.
+                    <span class="field-help-hint">Can't see it? Click the <strong>»</strong> at the end of the tabs and pick it. On Firefox this tab is called <strong>Storage</strong>.</span>
+                  </li>
+                  <li>On the left: open <strong>Cookies</strong>, then click <strong>https://soundcloud.com</strong> under it.</li>
+                  <li>Find the row named <strong>oauth_token</strong>.</li>
+                  <li>Double-click its value, copy it, and paste it in the box above. It looks like <code>2-123456-7890123-AbCdEf…</code></li>
+                </ol>
+                <p class="field-help-hint">The token can expire (e.g. if you log out of SoundCloud). If playlists stop loading later, just grab a fresh one the same way.</p>
+              </details>
             </div>
             <div class="test-row">
               <button type="button" class="btn btn-sm btn-secondary" onclick="testConnection('soundcloud', this)">Test Connection</button>
