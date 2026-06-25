@@ -138,6 +138,7 @@
 
         <div id="first-run-notice" class="notice notice--warn hidden">
           <strong>First run:</strong> No credentials detected. Add your Spotify or SoundCloud credentials below to get started.
+          <a href="https://github.com/Kariimc/Sub-Scraper/blob/HEAD/SETUP.md" target="_blank" rel="noopener">Open the full step-by-step guide →</a>
         </div>
 
         <form id="settings-form" onsubmit="return false">
@@ -155,6 +156,24 @@
                 <button type="button" class="btn btn-xs btn-ghost reveal-btn" onclick="toggleReveal('f-spotify-secret', this)">Show</button>
               </div>
             </div>
+            <details class="field-help">
+              <summary>How do I get these keys?</summary>
+              <p class="field-help-intro">Free, one-time setup — about 2 minutes:</p>
+              <ol>
+                <li>Open the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Spotify Developer Dashboard</a> and log in with your normal Spotify account.</li>
+                <li>Click <strong>Create app</strong>. Give it any name (e.g. "Sub-Scraper") and description.</li>
+                <li>In the <strong>Redirect URIs</strong> box, paste this <em>exactly</em>, then click <strong>Add</strong>:
+                  <span class="copy-chip">
+                    <code>http://127.0.0.1:8888/callback</code>
+                    <button type="button" class="btn btn-xs btn-ghost" onclick="copyText('http://127.0.0.1:8888/callback', this)">Copy</button>
+                  </span>
+                  <span class="field-help-hint">Use <strong>127.0.0.1</strong> (not "localhost"), and keep the <code>http://</code> and <code>/callback</code>. This is the #1 thing people get wrong.</span>
+                </li>
+                <li>Tick <strong>Web API</strong>, accept the terms, and click <strong>Save</strong>.</li>
+                <li>Open the app's <strong>Settings</strong> (top-right), then copy the <strong>Client ID</strong> and <strong>Client Secret</strong> into the boxes above.</li>
+              </ol>
+              <p class="field-help-hint">⚠️ Spotify's login runs on your own computer, so load your Spotify library from the <strong>desktop app</strong> or the <strong>local</strong> web version (<code>web_run.bat</code> → localhost:8080). The hosted link works for SoundCloud, but can't finish the Spotify login.</p>
+            </details>
             <div class="test-row">
               <button type="button" class="btn btn-sm btn-secondary" onclick="testConnection('spotify', this)">Test Connection</button>
               <span class="test-status" id="test-spotify"></span>
@@ -166,6 +185,7 @@
             <div class="form-row">
               <label for="f-sc-user">Username</label>
               <input type="text" id="f-sc-user" name="soundcloud_username" autocomplete="off" placeholder="Enter SoundCloud username" />
+              <span class="form-hint">The part after <strong>soundcloud.com/</strong> in your profile link — e.g. <code>john-doe</code>. This alone is enough for your <strong>public</strong> liked songs.</span>
             </div>
             <div class="form-row">
               <label for="f-sc-token">Auth Token</label>

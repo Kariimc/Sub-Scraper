@@ -529,3 +529,30 @@ function toggleReveal(inputId, btn) {
   el.type = isPassword ? "text" : "password";
   btn.textContent = isPassword ? "Hide" : "Show";
 }
+
+// Copy text to the clipboard with a brief "Copied ✓" confirmation on the button.
+// Falls back to a hidden textarea for browsers that block the async clipboard API.
+function copyText(text, btn) {
+  const restore = btn.textContent;
+  const confirm = () => {
+    btn.textContent = "Copied ✓";
+    setTimeout(() => { btn.textContent = restore; }, 1500);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(confirm).catch(() => fallbackCopy(text, confirm));
+  } else {
+    fallbackCopy(text, confirm);
+  }
+}
+
+function fallbackCopy(text, done) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand("copy"); } catch (_) { /* best-effort */ }
+  document.body.removeChild(ta);
+  if (done) done();
+}
