@@ -44,13 +44,12 @@ class SetupWizard(ctk.CTkFrame):
         self._prog_frame = ctk.CTkFrame(self, fg_color="transparent")
         self._prog_frame.pack(fill="x", padx=60, pady=(20, 0))
 
-        # Content area
-        self._content = ctk.CTkFrame(self, fg_color="transparent")
-        self._content.pack(fill="both", expand=True, padx=60, pady=24)
-
-        # Nav buttons
+        # Nav buttons — packed to the bottom FIRST so they stay visible even on
+        # a short window. Tk's packer hands leftover space to earlier-packed
+        # widgets and clips the one packed last; reserving the bottom bar up
+        # front means the content area (next) is what shrinks — and it scrolls.
         nav = ctk.CTkFrame(self, fg_color="transparent")
-        nav.pack(fill="x", padx=60, pady=(0, 40))
+        nav.pack(side="bottom", fill="x", padx=60, pady=(8, 30))
 
         self._back_btn = ctk.CTkButton(
             nav, text="← Back", width=110,
@@ -66,6 +65,12 @@ class SetupWizard(ctk.CTkFrame):
             command=self._next,
         )
         self._next_btn.pack(side="right")
+
+        # Content area — scrollable so a tall step (and all its input fields)
+        # stays fully reachable on small screens; anything the window can't show
+        # at once can be scrolled to.
+        self._content = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self._content.pack(side="top", fill="both", expand=True, padx=48, pady=(12, 4))
 
         self._render()
 

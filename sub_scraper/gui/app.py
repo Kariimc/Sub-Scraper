@@ -1279,8 +1279,11 @@ class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Sub-Scraper")
-        self.geometry("1120x720")
-        self.minsize(940, 600)
+        self.resizable(True, True)
+        # Size to fit the actual screen — a fixed geometry can open taller than
+        # the display (DPI scaling inflates it on Windows), hiding the controls
+        # along the bottom with no way to reach them.
+        self._apply_fitting_geometry(ideal_w=1120, ideal_h=720, min_w=820, min_h=520)
         self.configure(fg_color=DARK_BG)
 
         self._config = Config.load()
@@ -1300,6 +1303,37 @@ class App(ctk.CTk):
         set_window_icon(self)
         self._build()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _apply_fitting_geometry(self, ideal_w: int, ideal_h: int,
+                                min_w: int, min_h: int) -> None:
+        """Open at a size guaranteed to fit the display.
+
+        A fixed geometry can open larger than the screen — especially on Windows,
+        where DPI scaling multiplies the requested size — pushing the controls
+        along the bottom edge off-screen with no way to reach them. We clamp the
+        initial size to the available screen and keep the minimum small enough
+        that the window can always be shrunk to fit.
+        """
+        init_w, init_h = ideal_w, ideal_h
+        try:
+            scaling = ctk.ScalingTracker.get_window_scaling(self) or 1.0
+        except Exception:
+            scaling = 1.0
+        try:
+            # winfo_screen* report physical pixels; geometry() multiplies by the
+            # scaling factor, so express the screen in the same logical units and
+            # leave a margin for the taskbar and title bar.
+            avail_w = int(self.winfo_screenwidth() / scaling) - 40
+            avail_h = int(self.winfo_screenheight() / scaling) - 80
+            if avail_w > 0 and avail_h > 0:
+                init_w = max(640, min(ideal_w, avail_w))
+                init_h = max(440, min(ideal_h, avail_h))
+        except Exception:
+            pass
+        # The minimum can never exceed the fitted size, or the window gets stuck
+        # partially off-screen with the bottom controls unreachable.
+        self.minsize(min(min_w, init_w), min(min_h, init_h))
+        self.geometry(f"{init_w}x{init_h}")
 
     def _build(self) -> None:
         sidebar = ctk.CTkFrame(self, width=210, fg_color=SIDEBAR_BG, corner_radius=0)
