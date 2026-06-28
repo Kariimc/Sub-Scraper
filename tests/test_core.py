@@ -698,6 +698,31 @@ def _t_web_manager_wiring():
     assert isinstance(s2, SoundCloudScraper) and mgr._soundcloud is s2, "soundcloud not wired"
 
 
+@check("web: end-to-end — a submitted track actually downloads via the wired scraper")
+def _t_web_download_e2e():
+    # Proves the blocker fix end to end: the web wiring helper + a scraper must
+    # carry a real track all the way to COMPLETE. Before the fix the manager had
+    # no scraper and this path raised "scraper not configured".
+    import sub_scraper.web.server as srv
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "music")
+        idx = DownloadIndex(Path(d) / "idx.json")
+        mgr = DownloadManager(max_workers=2, retry_limit=1)
+        mgr.configure_index(idx)
+        mgr.start()
+        # Swap the scraper factory the web server uses so no network is hit.
+        orig = srv.build_scraper
+        srv.build_scraper = lambda cfg, source: FakeScraper(WRITE_OK)
+        try:
+            srv._ensure_manager_scraper(mgr, "spotify")
+            t = run_job(mgr, "spotify", make_track(42), out)
+        finally:
+            srv.build_scraper = orig
+            mgr.stop()
+        assert t.status == DownloadStatus.COMPLETE, t.error
+        assert t.local_path and Path(t.local_path).exists(), "downloaded file missing"
+
+
 def main() -> int:
     print("Running Sub-Scraper core tests\n")
     _t_success(); _t_batch(); _t_retry(); _t_breaker(); _t_corrupt(); _t_no_audio()
@@ -711,6 +736,7 @@ def main() -> int:
     _t_index_stats(); _t_autosync()
     _t_config()
     _t_web_manager_wiring()
+    _t_web_download_e2e()
     _t_logo()
 
     passed = sum(1 for _, ok, _ in _RESULTS if ok)
