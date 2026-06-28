@@ -675,6 +675,29 @@ def _t_autosync():
         assert mgr2.interval_seconds() == 6.0 * 3600
 
 
+@check("web: submit wires the source's scraper into the manager (real downloads work)")
+def _t_web_manager_wiring():
+    # Regression guard: the web server used to never call configure_spotify/
+    # configure_soundcloud, so every real (non-demo) download failed with
+    # "scraper not configured". _ensure_manager_scraper must wire it.
+    import sub_scraper.web.server as srv
+    from sub_scraper.scrapers.spotify import SpotifyScraper
+    from sub_scraper.scrapers.soundcloud import SoundCloudScraper
+
+    srv._config.spotify_client_id = "cid"
+    srv._config.spotify_client_secret = "secret"
+    srv._config.soundcloud_username = "someuser"
+
+    mgr = DownloadManager.from_config(srv._config)
+    # A freshly built manager has no scrapers — downloads would fail here.
+    assert mgr._spotify is None and mgr._soundcloud is None
+
+    s1 = srv._ensure_manager_scraper(mgr, "spotify")
+    assert isinstance(s1, SpotifyScraper) and mgr._spotify is s1, "spotify not wired"
+    s2 = srv._ensure_manager_scraper(mgr, "soundcloud")
+    assert isinstance(s2, SoundCloudScraper) and mgr._soundcloud is s2, "soundcloud not wired"
+
+
 def main() -> int:
     print("Running Sub-Scraper core tests\n")
     _t_success(); _t_batch(); _t_retry(); _t_breaker(); _t_corrupt(); _t_no_audio()
@@ -687,6 +710,7 @@ def main() -> int:
     _t_desktop(); _t_updater()
     _t_index_stats(); _t_autosync()
     _t_config()
+    _t_web_manager_wiring()
     _t_logo()
 
     passed = sum(1 for _, ok, _ in _RESULTS if ok)

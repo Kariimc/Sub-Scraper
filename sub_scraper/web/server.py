@@ -137,6 +137,22 @@ def _get_or_init_manager() -> DownloadManager:
     return _manager
 
 
+def _ensure_manager_scraper(mgr: DownloadManager, source: str):
+    """Wire the scraper for ``source`` into the manager using the CURRENT saved
+    credentials, returning it.
+
+    The manager starts with no per-source scraper (both default to None). Unless
+    this runs before a batch is submitted, every real (non-demo) download fails
+    with "scraper not configured". Building it at submit time also means the
+    latest Settings/env-var credentials are always used."""
+    scraper = build_scraper(_config, source)
+    if source == SPOTIFY:
+        mgr.configure_spotify(scraper)
+    else:
+        mgr.configure_soundcloud(scraper)
+    return scraper
+
+
 # --- Spotify OAuth (web login flow) ----------------------------------------
 
 _SPOTIFY_CALLBACK_PATH = "/api/spotify/callback"
@@ -201,6 +217,19 @@ def _friendly_library_error(source: str, exc: Exception) -> str:
                         "then click Load Library again.")
             msg = getattr(exc, "msg", "") or str(exc)
             return f"Spotify returned an error ({status}): {msg}"
+    if source == SOUNDCLOUD:
+        text = str(exc).lower()
+        if "401" in text or "403" in text or "oauth" in text:
+            return ("SoundCloud rejected the request. If you're loading playlists or "
+                    "private likes, your token may have expired — grab a fresh one "
+                    "(Settings explains how). Public likes only need your username.")
+        if "404" in text or "not found" in text:
+            return ("That SoundCloud username wasn't found. Double-check it in "
+                    "Settings — it's the part after soundcloud.com/ in your profile link.")
+        if "too long" in text:
+            return str(exc)
+        return ("Couldn't load your SoundCloud likes. Check your username in Settings, "
+                "and make sure your likes are set to public.")
     # Network / unknown — keep it short but honest.
     text = str(exc).strip() or exc.__class__.__name__
     return f"Couldn't load your library: {text}"
@@ -414,11 +443,12 @@ async def load_library(body: dict) -> dict:
             detail="Connect your Spotify account first — open Settings and click "
                    "“Connect Spotify”. Spotify needs a one-time login in your browser.",
         )
-    if source == SOUNDCLOUD and not (_config.soundcloud_username or _config.soundcloud_auth_token):
+    if source == SOUNDCLOUD and not _config.soundcloud_username:
         raise HTTPException(
             status_code=400,
-            detail="SoundCloud isn't set up yet. Open Settings and add your "
-                   "SoundCloud username (and token for playlists), then Save.",
+            detail="Add your SoundCloud username in Settings to load your liked "
+                   "songs. (The token alone isn't enough — it's only needed on top "
+                   "of the username, for playlists and private likes.)",
         )
 
     try:
@@ -484,6 +514,16 @@ async def submit_downloads(body: dict) -> dict:
         )
 
     mgr = _get_or_init_manager()
+
+    # Without this the manager has no scraper for this source and every track
+    # fails with "scraper not configured".
+    try:
+        _ensure_manager_scraper(mgr, source)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Couldn't set up the {source} downloader: {exc}",
+        ) from exc
 
     jobs: list[DownloadJob] = []
     for track in selected:

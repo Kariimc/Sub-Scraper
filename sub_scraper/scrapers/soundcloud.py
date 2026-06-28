@@ -140,7 +140,12 @@ class SoundCloudScraper(BaseScraper):
 
         url = f"https://soundcloud.com/{self.username}/likes"
         cmd = [_YT_DLP, "--flat-playlist", "-J", url] + self._auth_args()
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                "SoundCloud took too long to respond — please try again."
+            ) from exc
 
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or "yt-dlp failed to fetch library")
@@ -267,7 +272,12 @@ class SoundCloudScraper(BaseScraper):
 
     def _fetch_playlist_tracks_ytdlp(self, playlist_url: str) -> list[Track]:
         cmd = [_YT_DLP, "--flat-playlist", "-J", playlist_url] + self._auth_args()
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                "SoundCloud took too long to respond — please try again."
+            ) from exc
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or "yt-dlp failed to fetch playlist tracks")
         try:
