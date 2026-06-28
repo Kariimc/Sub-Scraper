@@ -58,12 +58,23 @@ from the included `Dockerfile` and read your `$PORT` automatically.
 1. Click: **[Deploy to Render](https://render.com/deploy?repo=https://github.com/Kariimc/Sub-Scraper)**
 2. Sign in with GitHub, click **Connect** on this repo.
 3. Render reads `render.yaml`, click **Apply**.
-4. Wait ~3 minutes for the first build. You'll get a link like
-   **`https://sub-scraper.onrender.com`**.
-5. Open it → **Settings** → paste your Spotify/SoundCloud credentials → **Save**.
+4. During setup Render asks you to fill in the **environment variables** from
+   `render.yaml` (`SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`,
+   `SOUNDCLOUD_USERNAME`, `SOUNDCLOUD_AUTH_TOKEN`). Paste in the ones you use and
+   leave the rest blank. You can also add/edit them later under your service →
+   **Environment**.
+5. Wait ~3 minutes for the first build. You'll get a link like
+   **`https://sub-scraper.onrender.com`** — open it and you're ready.
 
-> Free Render services **sleep after 15 minutes idle** and take ~30s to wake on
-> the next visit. That's fine for friends trying it out.
+> ⚠️ **Put your keys in Environment variables, not just the Settings page.**
+> Free Render services **sleep after 15 minutes idle** (and take ~30s to wake).
+> When they sleep, the disk is wiped — so anything typed into the in-app
+> **Settings** page is **lost**, but environment variables **persist**. Setting
+> them as above means you never re-enter your keys.
+>
+> One exception: the Spotify *login* itself can't be stored as an env var, so
+> after the instance wakes you may need to click **Connect Spotify** once more
+> (no retyping — your keys are already there). SoundCloud has no such step.
 
 ### Railway
 
@@ -72,7 +83,10 @@ from the included `Dockerfile` and read your `$PORT` automatically.
 3. Railway reads `railway.json` + `Dockerfile` and builds it.
 4. Under **Settings → Networking**, click **Generate Domain** to get a public URL
    like **`https://sub-scraper-production.up.railway.app`**.
-5. Open it → **Settings** → paste your credentials → **Save**.
+5. Under **Variables**, add the keys you use — `SPOTIFY_CLIENT_ID`,
+   `SPOTIFY_CLIENT_SECRET`, `SOUNDCLOUD_USERNAME`, `SOUNDCLOUD_AUTH_TOKEN` — so
+   they persist. (Credentials typed into the in-app Settings page don't survive a
+   redeploy.) Then open your URL.
 
 ### Keep it auto-updating on every push
 
@@ -96,16 +110,17 @@ always runs the latest version — nothing to configure:
 ## Important notes for hosted instances
 
 - **Each person needs their own Spotify keys.** The app reads *your* library, so
-  whoever uses it must add their own credentials in Settings (it takes 2 minutes
-  — see [`SETUP.md`](SETUP.md)). Nothing is shared between instances.
+  whoever uses it must add their own credentials (it takes 2 minutes — see
+  [`SETUP.md`](SETUP.md)). Nothing is shared between instances.
 - **Downloads land on the server**, not on the visitor's computer. The hosted web
   version is best for browsing libraries and trying the engine. To build and keep
   a real music collection — and to copy it to a **portable HiFi player** — use the
   desktop app (it has the **Device Sync** tab).
-- **Spotify redirect URI:** the hosted login flow still uses the desktop OAuth
-  redirect. For a purely hosted login you'd add your deploy URL to the Spotify
-  app's redirect URIs; for trying it out, loading a public playlist or your
-  SoundCloud likes works without that step.
+- **Spotify login is fully hosted.** The web app has a built-in login: open
+  **Settings → Connect your Spotify account**, copy the **Redirect URI** it shows
+  (your live URL + `/api/spotify/callback`), add it to your Spotify app's redirect
+  URIs, then click **Connect Spotify**. The page walks you through it. SoundCloud
+  public likes need only a username — no login step.
 - **Keep your instance private** if you put real credentials in it — don't post
   the Settings page publicly with keys saved.
 

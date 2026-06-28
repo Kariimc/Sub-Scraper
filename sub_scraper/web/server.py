@@ -311,10 +311,20 @@ async def health() -> dict:
     return {"status": "ok", "version": "2.2"}
 
 
+# True on a hosted platform whose free tier wipes the disk on sleep/redeploy —
+# used to warn that Settings-entered keys won't persist (env vars should be used).
+_HOSTED_EPHEMERAL = bool(
+    os.environ.get("RENDER")
+    or os.environ.get("RENDER_EXTERNAL_URL")
+    or os.environ.get("RAILWAY_ENVIRONMENT")
+)
+
+
 @app.get("/api/config")
 async def get_config() -> dict:
     data = _mask_config(_config)
     data["env_locked"] = sorted(_env_locked)
+    data["hosted_ephemeral"] = _HOSTED_EPHEMERAL
     return data
 
 

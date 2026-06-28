@@ -15,3 +15,16 @@ services:
       # Render injects $PORT automatically; web_run.py honours it.
       - key: PYTHONUNBUFFERED
         value: "1"
+      # Credentials set here PERSIST across the free tier's sleep/wake cycle
+      # (the disk does not — anything typed into the in-app Settings page is
+      # wiped when a free instance sleeps). sync:false makes Render prompt for
+      # each value at deploy time and keep it private. All optional — fill in
+      # only the service(s) you use. The app reads these via _ENV_CREDENTIAL_MAP.
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
+      - key: SOUNDCLOUD_USERNAME
+        sync: false
+      - key: SOUNDCLOUD_AUTH_TOKEN
+        sync: false

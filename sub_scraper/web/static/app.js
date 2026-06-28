@@ -443,6 +443,17 @@ async function loadConfig() {
     const notice = document.getElementById("first-run-notice");
     if (notice) notice.classList.toggle("hidden", hasCredentials);
 
+    // On a free hosted instance, keys typed into Settings are wiped on sleep.
+    // Nudge toward environment variables — but only if the user is actually
+    // relying on Settings (i.e. some credential is set yet not env-locked).
+    const persist = document.getElementById("persist-notice");
+    if (persist) {
+      const credFields = ["spotify_client_id", "spotify_client_secret",
+                          "soundcloud_username", "soundcloud_auth_token"];
+      const reliesOnSettings = credFields.some(f => cfg[f] && !locked.includes(f));
+      persist.classList.toggle("hidden", !(cfg.hosted_ephemeral && reliesOnSettings));
+    }
+
     // Baked-in credentials → open straight into the library, already "logged
     // in": no Load button, no source picking, no key entry. Runs once.
     if (hasCredentials && !_autoLoaded && !_demoMode) {
