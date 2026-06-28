@@ -121,7 +121,18 @@ You're not publishing anything — it's just a key for yourself.
 6. You're now on the app page. Click **Settings** (top-right).
 7. Copy your **Client ID** (it's shown right there).
 8. Click **View client secret** and copy the **Client Secret** too.
-9. Paste both into Sub-Scraper (wizard **Step 1**, or **Settings → Spotify**).
+9. **Approve your own account** (this is required, and easy to miss). Still in
+   **Settings**, find **User Management**, click it, and add:
+   - **Name:** anything, e.g. `me`
+   - **Email:** the **exact email on your Spotify account**
+
+   Click **Add user**, then **Save**.
+   > ⚠️ **Why this matters:** new Spotify apps start in **“Development mode,”**
+   > which only lets accounts on this list read your library. Skip this and your
+   > library will fail to load with a **403** even though login worked. Adding
+   > yourself here fixes it.
+10. Paste your Client ID and Secret into Sub-Scraper (wizard **Step 1**, or
+    **Settings → Spotify**).
 
 That's it for Spotify. 🎉
 
@@ -223,6 +234,22 @@ http://127.0.0.1:8888/callback
 
 No `localhost`, no trailing slash, no `https`. Delete the wrong one, add this
 one, **Save**, and try again.
+</details>
+
+<details>
+<summary><b>Spotify: login worked but the library fails to load (“403”)</b></summary>
+
+Your account isn't approved on the app yet. New Spotify apps run in
+**Development mode**, which only serves your library to accounts on the app's
+allow-list. Fix it:
+
+1. Open the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+   → your app → **Settings** → **User Management**.
+2. Add your **name** and the **exact email on your Spotify account**, then
+   **Add user** and **Save**.
+3. Back in Sub-Scraper, click **Load Library** again.
+
+(This is the same step as Part 2 #9 — it's the most commonly missed one.)
 </details>
 
 <details>

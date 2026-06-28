@@ -240,13 +240,19 @@ class SetupWizard(ctk.CTkFrame):
             "2. Log in, then click  Create app  (name it anything).\n"
             "3. In  Redirect URIs, paste the address below and click  Add.\n"
             "4. Tick  Web API, save, then open  Settings.\n"
-            "5. Copy the Client ID and Client Secret into the boxes here."
+            "5. Copy the Client ID and Client Secret into the boxes here.\n"
+            "6. In Settings, open  User Management  and add your name and the email\n"
+            "   on your Spotify account — without this your library won't load."
         )
         self._link_btn("Open Spotify Developer Dashboard →", "https://developer.spotify.com/dashboard")
         self._copy_field("Redirect URI — paste this EXACTLY into Spotify:", _SPOTIFY_REDIRECT_URI)
         self._small_note(
             "⚠️  It must match exactly — use 127.0.0.1 (not localhost), keep http:// "
             "and /callback. This is the #1 thing people get wrong."
+        )
+        self._small_note(
+            "⚠️  Step 6 (User Management) is the #2 thing people miss: new apps are "
+            "in “Development mode” and only load libraries for approved accounts."
         )
         self._field("Client ID", "spotify_client_id")
         self._field("Client Secret (hidden)", "spotify_client_secret", show="*")

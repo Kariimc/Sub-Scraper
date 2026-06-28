@@ -165,6 +165,7 @@
                 <li>When it asks for a <strong>Redirect URI</strong>, use the one shown in <em>"Connect your account"</em> just below — it has a Copy button.</li>
                 <li>Tick <strong>Web API</strong>, accept the terms, and click <strong>Save</strong>.</li>
                 <li>Open the app's <strong>Settings</strong> (top-right), then copy the <strong>Client ID</strong> and <strong>Client Secret</strong> into the boxes above.</li>
+                <li>Still in Settings, open <strong>User Management</strong> and add your name and the <strong>email on your Spotify account</strong>, then Save — without this, loading your library fails even though login works.</li>
               </ol>
             </details>
             <div class="test-row">
@@ -181,6 +182,9 @@
                     <code id="spotify-redirect-uri">loading…</code>
                     <button type="button" class="btn btn-xs btn-ghost" onclick="copyRedirectUri(this)">Copy</button>
                   </span>
+                </li>
+                <li><strong>Approve your account</strong> — in the same Spotify settings, open <strong>User Management</strong> and add your name plus the <strong>email on your Spotify account</strong>, then Save.
+                  <span class="field-help-hint">Required: new Spotify apps run in “Development mode” and only let approved accounts load a library — skip this and loading fails with a 403 even though login worked.</span>
                 </li>
                 <li>Click <strong>Connect Spotify</strong>, log in, and approve.</li>
               </ol>
