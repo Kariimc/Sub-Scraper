@@ -3,6 +3,8 @@
 
 // ===== State =====
 let _source = "spotify";
+let _content = "likes";          // "likes" | "playlists"
+let _openPlaylist = null;        // {id, name} when viewing one playlist's tracks
 let _tracks = [];
 let _sse = null;
 let _demoMode = false; // true while the no-credentials sample library is shown
@@ -51,12 +53,32 @@ function showSection(name) {
 // ===== Source selection =====
 function setSource(src) {
   _source = src;
+  _openPlaylist = null;   // switching source drops any open playlist view
   document.getElementById("pill-spotify").classList.toggle("active", src === "spotify");
   document.getElementById("pill-soundcloud").classList.toggle("active", src === "soundcloud");
 }
 
+// ===== Content selection (liked songs vs playlists) =====
+function setContent(c) {
+  _content = c;
+  _openPlaylist = null;
+  const likes = document.getElementById("pill-likes");
+  const pls = document.getElementById("pill-playlists");
+  if (likes) likes.classList.toggle("active", c === "likes");
+  if (pls) pls.classList.toggle("active", c === "playlists");
+  updateLoadLabel();
+}
+
+function updateLoadLabel() {
+  const lbl = document.getElementById("load-label");
+  if (lbl) lbl.textContent = _content === "playlists" ? "Load Playlists" : "Load Library";
+}
+
 // ===== Library =====
 async function loadLibrary() {
+  // In playlists mode the primary button lists playlists instead of likes.
+  if (_content === "playlists" && !_openPlaylist) { await loadPlaylists(); return; }
+
   const btn = document.getElementById("btn-load");
   const spin = document.getElementById("load-spinner");
   const status = document.getElementById("library-status");
@@ -67,11 +89,14 @@ async function loadLibrary() {
   document.getElementById("track-controls").style.display = "none";
   document.getElementById("track-list").innerHTML = "";
 
+  const payload = { source: _source };
+  if (_openPlaylist) payload.playlist_id = _openPlaylist.id;
+
   try {
     const r = await fetch("/api/library/load", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source: _source }),
+      body: JSON.stringify(payload),
     });
     if (!r.ok) {
       const err = await r.json().catch(() => ({ detail: "Unknown error" }));
@@ -85,7 +110,19 @@ async function loadLibrary() {
     renderTracks(_tracks);
     const pending = _tracks.filter(t => t.status !== "complete").length;
     const done = _tracks.length - pending;
-    status.textContent = `${_tracks.length} tracks loaded — ${done} already downloaded, ${pending} to grab`;
+    const summary = `${_tracks.length} tracks loaded — ${done} already downloaded, ${pending} to grab`;
+    if (_openPlaylist) {
+      status.innerHTML = "";
+      const back = document.createElement("a");
+      back.href = "#";
+      back.className = "back-link";
+      back.textContent = "← Back to playlists";
+      back.onclick = (e) => { e.preventDefault(); loadPlaylists(); return false; };
+      status.appendChild(back);
+      status.append(`  ${esc(_openPlaylist.name)} — ${summary}`);
+    } else {
+      status.textContent = summary;
+    }
     document.getElementById("track-controls").style.display = _tracks.length ? "flex" : "none";
   } catch (e) {
     status.textContent = "Network error: " + e.message;
@@ -93,6 +130,77 @@ async function loadLibrary() {
     btn.disabled = false;
     spin.classList.add("hidden");
   }
+}
+
+// List the user's playlists for the current source so they can pick one.
+async function loadPlaylists() {
+  _openPlaylist = null;
+  const btn = document.getElementById("btn-load");
+  const spin = document.getElementById("load-spinner");
+  const status = document.getElementById("library-status");
+
+  btn.disabled = true;
+  spin.classList.remove("hidden");
+  status.textContent = "Loading playlists…";
+  document.getElementById("track-controls").style.display = "none";
+  document.getElementById("track-list").innerHTML = "";
+
+  try {
+    const r = await fetch("/api/library/playlists", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: _source }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ detail: "Unknown error" }));
+      status.textContent = "Error: " + (err.detail || r.statusText);
+      return;
+    }
+    const data = await r.json();
+    const playlists = data.playlists || [];
+    renderPlaylists(playlists);
+    status.textContent = playlists.length
+      ? `${playlists.length} playlist${playlists.length === 1 ? "" : "s"} — click one to load its tracks`
+      : "No playlists found for this account.";
+  } catch (e) {
+    status.textContent = "Network error: " + e.message;
+  } finally {
+    btn.disabled = false;
+    spin.classList.add("hidden");
+  }
+}
+
+function renderPlaylists(playlists) {
+  const list = document.getElementById("track-list");
+  list.innerHTML = "";
+  if (!playlists.length) {
+    list.innerHTML = '<p style="color:var(--text-muted);padding:24px 0;">No playlists found.</p>';
+    return;
+  }
+  playlists.forEach(p => {
+    const row = document.createElement("div");
+    row.className = "track-row playlist-row";
+
+    const info = document.createElement("div");
+    info.className = "track-info";
+    const count = (typeof p.total === "number") ? `${p.total} track${p.total === 1 ? "" : "s"}` : "";
+    info.innerHTML = `<div class="track-title">${esc(p.name)}</div>
+                      <div class="track-artist">${esc(count)}</div>`;
+
+    const go = document.createElement("span");
+    go.className = "track-status";
+    go.textContent = "Open →";
+
+    row.append(info, go);
+    row.addEventListener("click", () => openPlaylist(p));
+    list.appendChild(row);
+  });
+}
+
+// Load one playlist's tracks into the normal track list (downloadable as usual).
+async function openPlaylist(p) {
+  _openPlaylist = { id: p.id, name: p.name };
+  await loadLibrary();   // sends playlist_id because _openPlaylist is set
 }
 
 // Load a no-setup sample library so first-time visitors can explore the UI.
@@ -143,6 +251,7 @@ function renderTracks(tracks) {
     chk.checked = false;
     chk.addEventListener("change", () => {
       row.classList.toggle("selected", chk.checked);
+      syncSelectAll();
     });
 
     const info = document.createElement("div");
@@ -170,6 +279,7 @@ function renderTracks(tracks) {
       if (e.target === chk) return;
       chk.checked = !chk.checked;
       row.classList.toggle("selected", chk.checked);
+      syncSelectAll();
     });
     list.appendChild(row);
   });
@@ -187,12 +297,24 @@ function esc(s) {
 }
 
 // ===== Selection =====
+// Keep the master "Select All" box in sync with the individual row checkboxes.
+function syncSelectAll() {
+  const boxes = [...document.querySelectorAll("#track-list .track-row input[type=checkbox]")];
+  const master = document.getElementById("chk-all");
+  if (!master) return;
+  const allChecked = boxes.length > 0 && boxes.every(c => c.checked);
+  master.checked = allChecked;
+  master.indeterminate = !allChecked && boxes.some(c => c.checked);
+}
+
 function toggleSelectAll(checked) {
   document.querySelectorAll("#track-list .track-row input[type=checkbox]").forEach(c => {
     c.checked = checked;
     c.closest(".track-row").classList.toggle("selected", checked);
   });
-  document.getElementById("chk-all").checked = checked;
+  const master = document.getElementById("chk-all");
+  master.checked = checked;
+  master.indeterminate = false;
 }
 
 // ===== Downloads =====
@@ -398,6 +520,15 @@ async function loadConfig() {
     set("f-quality",        cfg.audio_quality);
     set("f-concurrent",     cfg.max_concurrent);
 
+    // Secret fields load blank (masked). If one is actually saved, say so in the
+    // placeholder so it doesn't look like the user forgot to enter it.
+    const savedHint = (id, val) => {
+      const el = document.getElementById(id);
+      if (el && val === "••••••••") el.placeholder = "Saved — leave blank to keep, or type a new one";
+    };
+    savedHint("f-spotify-secret", cfg.spotify_client_secret);
+    savedHint("f-sc-token",       cfg.soundcloud_auth_token);
+
     // Mark fields that are pre-configured via server environment variables.
     _envLocked = new Set(cfg.env_locked || []);
     const fieldToInputId = {
@@ -458,8 +589,22 @@ async function loadConfig() {
     // in": no Load button, no source picking, no key entry. Runs once.
     if (hasCredentials && !_autoLoaded && !_demoMode) {
       _autoLoaded = true;
-      setSource(hasSpotify ? "spotify" : "soundcloud");
-      loadLibrary();
+      const preferSpotify = hasSpotify;
+      setSource(preferSpotify ? "spotify" : "soundcloud");
+      if (preferSpotify) {
+        // Only auto-load Spotify once the one-time login is actually done;
+        // otherwise open Settings to Connect instead of flashing a library error.
+        try {
+          const sr = await fetch("/api/spotify/status");
+          const ss = sr.ok ? await sr.json() : {};
+          if (ss.connected) loadLibrary();
+          else showSection("settings");
+        } catch {
+          showSection("settings");
+        }
+      } else {
+        loadLibrary();
+      }
     }
 
     // Populate the Spotify "Connect account" panel (redirect URI + status).
@@ -538,6 +683,12 @@ async function testConnection(source, btn) {
 
 // ===== Spotify account connection (web OAuth) =====
 async function refreshSpotifyConnect() {
+  // Fill the redirect URI immediately from the current page origin so the user
+  // never sees a "…" placeholder; the server value (below) refines it if needed.
+  const uriEl0 = document.getElementById("spotify-redirect-uri");
+  if (uriEl0 && (!uriEl0.textContent.trim() || uriEl0.textContent.trim() === "…")) {
+    uriEl0.textContent = window.location.origin + "/api/spotify/callback";
+  }
   try {
     const r = await fetch("/api/spotify/status");
     if (!r.ok) return;
@@ -595,7 +746,7 @@ function handleSpotifyReturn() {
         outcome === "denied"
           ? "✗ Login was cancelled — click Connect Spotify to try again."
           : outcome === "nokeys"
-          ? "✗ Add your Client ID and Secret above and Save first, then click Connect Spotify."
+          ? "✗ Add your Client ID and Secret in the boxes above, then click Connect Spotify (it saves them for you)."
           : "✗ Login failed — check your keys and that the redirect URI above is added in Spotify, then retry.";
       status.className = "test-status test-err";
     }

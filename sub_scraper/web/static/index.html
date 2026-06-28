@@ -57,9 +57,13 @@
             <button class="pill active" id="pill-spotify" onclick="setSource('spotify')">Spotify</button>
             <button class="pill" id="pill-soundcloud" onclick="setSource('soundcloud')">SoundCloud</button>
           </div>
+          <div class="source-pills" id="content-pills" title="Choose what to load">
+            <button class="pill active" id="pill-likes" onclick="setContent('likes')">Liked Songs</button>
+            <button class="pill" id="pill-playlists" onclick="setContent('playlists')">Playlists</button>
+          </div>
           <button class="btn btn-primary" id="btn-load" onclick="loadLibrary()">
             <span id="load-spinner" class="spinner hidden"></span>
-            Load Library
+            <span id="load-label">Load Library</span>
           </button>
           <button class="btn btn-ghost" id="btn-demo" onclick="loadDemo()">
             Try a Demo
@@ -175,7 +179,7 @@
                 <li>When it asks for a <strong>Redirect URI</strong>, use the one shown in <em>"Connect your account"</em> just below — it has a Copy button.</li>
                 <li>Tick <strong>Web API</strong>, accept the terms, and click <strong>Save</strong>.</li>
                 <li>Open the app's <strong>Settings</strong> (top-right), then copy the <strong>Client ID</strong> and <strong>Client Secret</strong> into the boxes above.</li>
-                <li>Still in Settings, open <strong>User Management</strong> and add your name and the <strong>email on your Spotify account</strong>, then Save — without this, loading your library fails even though login works.</li>
+                <li>You'll also approve your own account — that's <strong>step 2</strong> of <em>"Connect your Spotify account"</em> just below.</li>
               </ol>
             </details>
             <div class="test-row">
@@ -187,11 +191,13 @@
               <p class="connect-title"><strong>Connect your Spotify account</strong> <span class="connect-state" id="spotify-connect-state"></span></p>
               <p class="field-help-hint">A one-time login so this app can read your liked songs and playlists.</p>
               <ol class="connect-steps">
+                <li>Make sure your <strong>Client ID</strong> and <strong>Client Secret</strong> are filled in above — Connect saves them for you automatically.</li>
                 <li>In your <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Spotify app's settings</a>, add this exact <strong>Redirect URI</strong> and Save:
                   <span class="copy-chip">
-                    <code id="spotify-redirect-uri">loading…</code>
+                    <code id="spotify-redirect-uri">…</code>
                     <button type="button" class="btn btn-xs btn-ghost" onclick="copyRedirectUri(this)">Copy</button>
                   </span>
+                  <span class="field-help-hint">Paste it exactly as shown — Spotify rejects the login if even one character (or a trailing slash) differs.</span>
                 </li>
                 <li><strong>Approve your account</strong> — in the same Spotify settings, open <strong>User Management</strong> and add your name plus the <strong>email on your Spotify account</strong>, then Save.
                   <span class="field-help-hint">Required: new Spotify apps run in “Development mode” and only let approved accounts load a library — skip this and loading fails with a 403 even though login worked.</span>

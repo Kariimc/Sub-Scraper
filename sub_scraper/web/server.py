@@ -432,6 +432,65 @@ async def spotify_disconnect() -> dict:
     return {"ok": True}
 
 
+def _check_source_ready(source: str, *, need_playlists: bool) -> None:
+    """Raise a friendly HTTP 400 if the credentials for this action are missing.
+
+    ``need_playlists`` flags a playlist action: SoundCloud playlists require an
+    auth token, whereas SoundCloud liked songs only need a username."""
+    if source == SPOTIFY:
+        if not (_config.spotify_client_id and _config.spotify_client_secret):
+            raise HTTPException(
+                status_code=400,
+                detail="Spotify isn't set up yet. Open Settings and add your Spotify "
+                       "Client ID and Client Secret, then Save.",
+            )
+        if not _spotify_has_token(_config.spotify_client_id, _config.spotify_client_secret):
+            raise HTTPException(
+                status_code=400,
+                detail="Connect your Spotify account first — open Settings and click "
+                       "“Connect Spotify”. Spotify needs a one-time login in your browser.",
+            )
+        return
+    # SoundCloud
+    if need_playlists:
+        if not _config.soundcloud_auth_token:
+            raise HTTPException(
+                status_code=400,
+                detail="SoundCloud playlists need an Auth Token. Open Settings, add "
+                       "your SoundCloud token (the “How do I get this token?” guide "
+                       "shows how), then try again.",
+            )
+    elif not _config.soundcloud_username:
+        raise HTTPException(
+            status_code=400,
+            detail="Add your SoundCloud username in Settings to load your liked "
+                   "songs. (The token alone isn't enough — it's only needed on top "
+                   "of the username, for playlists and private likes.)",
+        )
+
+
+@app.post("/api/library/playlists")
+async def load_playlists(body: dict) -> dict:
+    """List the user's playlists for a source so the UI can show them alongside
+    liked songs. Spotify needs its one-time login; SoundCloud needs an auth token."""
+    source: str = body.get("source", "spotify").lower()
+    if source not in (SPOTIFY, SOUNDCLOUD):
+        raise HTTPException(status_code=400, detail=f"Unknown source: {source!r}")
+    _check_source_ready(source, need_playlists=True)
+
+    try:
+        scraper = build_scraper(_config, source)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to build scraper: {exc}") from exc
+
+    loop = asyncio.get_event_loop()
+    try:
+        playlists = await loop.run_in_executor(None, scraper.fetch_playlists)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=_friendly_library_error(source, exc)) from exc
+    return {"playlists": playlists}
+
+
 @app.post("/api/library/load")
 async def load_library(body: dict) -> dict:
     global _library
@@ -439,27 +498,12 @@ async def load_library(body: dict) -> dict:
     if source not in (SPOTIFY, SOUNDCLOUD):
         raise HTTPException(status_code=400, detail=f"Unknown source: {source!r}")
 
+    # A playlist id/url loads that playlist's tracks; otherwise it's liked songs.
+    playlist_id = (body.get("playlist_id") or "").strip()
+
     # Friendly credential precheck so first-time users get a clear pointer to
     # Settings instead of a raw library-provider error.
-    if source == SPOTIFY and not (_config.spotify_client_id and _config.spotify_client_secret):
-        raise HTTPException(
-            status_code=400,
-            detail="Spotify isn't set up yet. Open Settings and add your Spotify "
-                   "Client ID and Client Secret, then Save.",
-        )
-    if source == SPOTIFY and not _spotify_has_token(_config.spotify_client_id, _config.spotify_client_secret):
-        raise HTTPException(
-            status_code=400,
-            detail="Connect your Spotify account first — open Settings and click "
-                   "“Connect Spotify”. Spotify needs a one-time login in your browser.",
-        )
-    if source == SOUNDCLOUD and not _config.soundcloud_username:
-        raise HTTPException(
-            status_code=400,
-            detail="Add your SoundCloud username in Settings to load your liked "
-                   "songs. (The token alone isn't enough — it's only needed on top "
-                   "of the username, for playlists and private likes.)",
-        )
+    _check_source_ready(source, need_playlists=bool(playlist_id))
 
     try:
         scraper = build_scraper(_config, source)
@@ -469,6 +513,8 @@ async def load_library(body: dict) -> dict:
     loop = asyncio.get_event_loop()
 
     def _fetch() -> list[Track]:
+        if playlist_id:
+            return scraper.fetch_playlist_tracks(playlist_id)
         return scraper.fetch_library()
 
     try:

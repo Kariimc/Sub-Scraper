@@ -184,6 +184,13 @@ body {
 .track-row.selected { border-color: var(--blue); background: #f0f6ff; }
 .track-row input[type="checkbox"] { cursor: pointer; width: 15px; height: 15px; }
 
+/* Playlist rows reuse the track-row look but read as openable items. */
+.playlist-row .track-status { background: var(--card-alt); color: var(--navy); }
+.playlist-row:hover .track-status { background: var(--navy); color: var(--white); }
+
+.back-link { color: var(--blue); font-weight: 600; text-decoration: none; margin-right: 8px; }
+.back-link:hover { text-decoration: underline; }
+
 .track-info { flex: 1; min-width: 0; }
 .track-title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .track-artist { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
