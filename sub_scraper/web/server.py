@@ -25,6 +25,9 @@ from sub_scraper.scrapers.spotify import (
     has_cached_token as _spotify_has_token,
 )
 
+import spotipy
+from spotipy.oauth2 import SpotifyOauthError
+
 # Spotify's login can't pop a desktop browser here, and its OAuth redirect must
 # return to this server — signal the scraper to run headless and use the token
 # the /api/spotify/callback route caches.
@@ -165,6 +168,42 @@ def _public_base_url(request: Request) -> str:
 
 def _spotify_redirect_uri(request: Request) -> str:
     return _public_base_url(request) + _SPOTIFY_CALLBACK_PATH
+
+
+def _friendly_library_error(source: str, exc: Exception) -> str:
+    """Turn a raw scraper/Spotify exception into plain, do-this-next guidance.
+
+    The library-load failure shows verbatim in the UI, so a non-technical user
+    needs a sentence that says what's wrong AND how to fix it — not a stack-trace
+    fragment like 'http status: 403'."""
+    if source == SPOTIFY:
+        # A bad/expired login: clear the cached token so the UI flips back to
+        # "Not connected" and the next step is obviously to reconnect.
+        if isinstance(exc, SpotifyOauthError):
+            _spotify_clear_token()
+            return ("Your Spotify login couldn't be refreshed. Open Settings, click "
+                    "Disconnect, then Connect Spotify again to log in fresh.")
+        if isinstance(exc, spotipy.SpotifyException):
+            status = getattr(exc, "http_status", None)
+            if status == 401:
+                _spotify_clear_token()
+                return ("Your Spotify login expired. Open Settings, click Disconnect, "
+                        "then Connect Spotify again.")
+            if status == 403:
+                return ("Spotify blocked access to your library. New Spotify apps start "
+                        "in “Development mode”, which only allows accounts you "
+                        "approve. Fix it in 30 seconds: open your app on the "
+                        "Spotify Developer Dashboard → Settings → User "
+                        "Management, then add your own name and the email on your "
+                        "Spotify account. Save, then try Load Library again.")
+            if status == 429:
+                return ("Spotify is rate-limiting requests right now. Wait a minute, "
+                        "then click Load Library again.")
+            msg = getattr(exc, "msg", "") or str(exc)
+            return f"Spotify returned an error ({status}): {msg}"
+    # Network / unknown — keep it short but honest.
+    text = str(exc).strip() or exc.__class__.__name__
+    return f"Couldn't load your library: {text}"
 
 
 # IDs in the no-setup demo library all carry this prefix so the download path
@@ -395,7 +434,7 @@ async def load_library(body: dict) -> dict:
     try:
         tracks: list[Track] = await loop.run_in_executor(None, _fetch)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Couldn't load your library: {exc}") from exc
+        raise HTTPException(status_code=502, detail=_friendly_library_error(source, exc)) from exc
 
     # Annotate tracks that are already downloaded
     for track in tracks:
